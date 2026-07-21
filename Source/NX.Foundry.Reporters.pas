@@ -50,10 +50,13 @@ type
   INxReportBuilder = interface
     ['{5FB22440-F022-45BC-8716-EDBD3D451877}']
     function Open(const aKey: string): INxReportBuilder;
-    function OpenArray: INxReportBuilder;
+    function OpenArray(const aKey: string): INxReportBuilder;
     function Close: INxReportBuilder;
     function Write(const aValue: string): INxReportBuilder; overload;
     function Write(const aKey, aValue: string): INxReportBuilder; overload;
+    function Write(const aKey: string; aValue: Boolean): INxReportBuilder; overload;
+    function Write(const aKey: string; aValue: Int64): INxReportBuilder; overload;
+    function Write(const aKey: string; aValue: Double): INxReportBuilder; overload;
     function Writeln: INxReportBuilder;
     function Indent: INxReportBuilder;
     function Outdent: INxReportBuilder;
@@ -72,19 +75,28 @@ type
     fValue: string;
     fIndentLevel: Integer;
     fIndentChars: Integer;
+    fFirstInScope: array of Boolean;
     fScopeStack: array of TNxBuilderScope;
+    fInvariantFormat: TFormatSettings;
     procedure AddIndent;
     procedure RemoveIndent;
     procedure WriteIndent;
+    procedure PushFirst;
+    procedure PopFirst;
+    procedure UpdateFirst;
+    function PeekFirst: Boolean;
     procedure PushScope(aScope: TNxBuilderScopeType; const aKey: string);
     function PopScope: TNxBuilderScope;
   public
     constructor Create; virtual;
     function Open(const aKey: string): INxReportBuilder; virtual;
-    function OpenArray: INxReportBuilder; virtual;
+    function OpenArray(const aKey: string): INxReportBuilder; virtual;
     function Close: INxReportBuilder; virtual;
     function Write(const aValue: string): INxReportBuilder; overload; virtual;
     function Write(const aKey, aValue: string): INxReportBuilder; overload; virtual;
+    function Write(const aKey: string; aValue: Boolean): INxReportBuilder; overload; virtual;
+    function Write(const aKey: string; aValue: Int64): INxReportBuilder; overload; virtual;
+    function Write(const aKey: string; aValue: Double): INxReportBuilder; overload; virtual;
     function Writeln: INxReportBuilder;
     function Indent: INxReportBuilder;
     function Outdent: INxReportBuilder;
@@ -96,10 +108,21 @@ type
   public
     function Write(const aValue: string): INxReportBuilder; override;
     function Write(const aKey, aValue: string): INxReportBuilder; override;
+    function Write(const aKey: string; aValue: Boolean): INxReportBuilder; overload; override;
+    function Write(const aKey: string; aValue: Int64): INxReportBuilder; overload; override;
+    function Write(const aKey: string; aValue: Double): INxReportBuilder; overload; override;
   end;
 
   TNxJsonReportBuilder = class(TNxBaseReportBuilder)
   public
+    function Open(const aKey: string): INxReportBuilder; override;
+    function OpenArray(const aKey: string): INxReportBuilder; override;
+    function Close: INxReportBuilder; override;
+    function Write(const aValue: string): INxReportBuilder; overload; override;
+    function Write(const aKey, aValue: string): INxReportBuilder; overload; override;
+    function Write(const aKey: string; aValue: Boolean): INxReportBuilder; overload; override;
+    function Write(const aKey: string; aValue: Int64): INxReportBuilder; overload; override;
+    function Write(const aKey: string; aValue: Double): INxReportBuilder; overload; override;
   end;
 
   TNxXmlReportBuilder = class(TNxBaseReportBuilder)
@@ -133,10 +156,17 @@ type
   end;
 
   TNxFileReporter = class(TNxBaseReporter)
-  private
+  protected
     fFileName: string;
   public
     constructor Create(const aFileName: string);
+  end;
+
+  TNxAIReporter = class(TNxFileReporter)
+  protected
+    procedure ReportFailures(const aBuilder: INxReportBuilder; const aSummary: INxTestSummary);
+  public
+    procedure OnRunEnds(const aTest: INxTest; const aSummary: INxTestSummary); override;
   end;
 
 implementation
@@ -169,6 +199,23 @@ constructor TNxBaseReportBuilder.Create;
 begin
   inherited;
   fIndentChars := 2;
+  fInvariantFormat.CurrencyString := #$00A4;
+  fInvariantFormat.CurrencyFormat := 0;
+  fInvariantFormat.CurrencyDecimals := 2;
+  fInvariantFormat.DateSeparator := '/';
+  fInvariantFormat.TimeSeparator := ':';
+  fInvariantFormat.ListSeparator := ',';
+  fInvariantFormat.ShortDateFormat := 'MM/dd/yyyy';
+  fInvariantFormat.LongDateFormat := 'dddd, dd MMMMM yyyy HH:nn:ss';
+  fInvariantFormat.TimeAMString := 'AM';
+  fInvariantFormat.TimePMString := 'PM';
+  fInvariantFormat.ShortTimeFormat := 'HH:nn';
+  fInvariantFormat.LongTimeFormat := 'HH:nn:ss';
+
+  fInvariantFormat.ThousandSeparator := ',';
+  fInvariantFormat.DecimalSeparator := '.';
+  fInvariantFormat.TwoDigitYearCenturyWindow := 50;
+  fInvariantFormat.NegCurrFormat := 0;
 end;
 
 procedure TNxBaseReportBuilder.AddIndent;
@@ -186,6 +233,32 @@ procedure TNxBaseReportBuilder.WriteIndent;
 begin
   if fIndentLevel > 0 then
     fValue := fValue + StringOfChar(' ', fIndentLevel * fIndentChars);
+end;
+
+procedure TNxBaseReportBuilder.PushFirst;
+begin
+  SetLength(fFirstInScope, Length(fFirstInScope) + 1);
+  fFirstInScope[High(fFirstInScope)] := True;
+end;
+
+procedure TNxBaseReportBuilder.PopFirst;
+begin
+  if Length(fFirstInScope) > 0 then
+    SetLength(fFirstInScope, Length(fFirstInScope) - 1);
+end;
+
+function TNxBaseReportBuilder.PeekFirst: Boolean;
+begin
+  if Length(fFirstInScope) > 0 then
+    Result := fFirstInScope[High(fFirstInScope)]
+  else
+    Result := True;
+end;
+
+procedure TNxBaseReportBuilder.UpdateFirst;
+begin
+  if Length(fFirstInScope) > 0 then
+    fFirstInScope[High(fFirstInScope)] := False;
 end;
 
 procedure TNxBaseReportBuilder.PushScope(aScope: TNxBuilderScopeType; const aKey: string);
@@ -212,17 +285,22 @@ begin
     end;
 end;
 
-function TNxBaseReportBuilder.Close: INxReportBuilder;
-begin
-  Result := Self;
-end;
-
 function TNxBaseReportBuilder.Open(const aKey: string): INxReportBuilder;
 begin
   Result := Self;
 end;
 
-function TNxBaseReportBuilder.OpenArray: INxReportBuilder;
+function TNxBaseReportBuilder.OpenArray(const aKey: string): INxReportBuilder;
+begin
+  Result := Self;
+end;
+
+function TNxBaseReportBuilder.Close: INxReportBuilder;
+begin
+  Result := Self;
+end;
+
+function TNxBaseReportBuilder.Write(const aValue: string): INxReportBuilder;
 begin
   Result := Self;
 end;
@@ -232,7 +310,17 @@ begin
   Result := Self;
 end;
 
-function TNxBaseReportBuilder.Write(const aValue: string): INxReportBuilder;
+function TNxBaseReportBuilder.Write(const aKey: string; aValue: Boolean): INxReportBuilder;
+begin
+  Result := Self;
+end;
+
+function TNxBaseReportBuilder.Write(const aKey: string; aValue: Int64): INxReportBuilder;
+begin
+  Result := Self;
+end;
+
+function TNxBaseReportBuilder.Write(const aKey: string; aValue: Double): INxReportBuilder;
 begin
   Result := Self;
 end;
@@ -267,6 +355,14 @@ end;
 
 // ***** TNxTextReportBuilder *****
 
+function TNxTextReportBuilder.Write(const aValue: string): INxReportBuilder;
+begin
+  WriteIndent;
+  fValue := fValue + aValue;
+  Writeln;
+  Result := Self;
+end;
+
 function TNxTextReportBuilder.Write(const aKey, aValue: string): INxReportBuilder;
 begin
   WriteIndent;
@@ -278,11 +374,150 @@ begin
   Result := Self;
 end;
 
-function TNxTextReportBuilder.Write(const aValue: string): INxReportBuilder;
+function TNxTextReportBuilder.Write(const aKey: string; aValue: Boolean): INxReportBuilder;
 begin
   WriteIndent;
-  fValue := fValue + aValue;
+  if aKey = '' then
+    fValue := fValue + BoolToStr(aValue, True)
+  else
+    fValue := fValue + aKey + ': ' + BoolToStr(aValue, True);
   Writeln;
+  Result := Self;
+end;
+
+function TNxTextReportBuilder.Write(const aKey: string; aValue: Int64): INxReportBuilder;
+begin
+  WriteIndent;
+  if aKey = '' then
+    fValue := fValue + IntToStr(aValue)
+  else
+    fValue := fValue + aKey + ': ' + IntToStr(aValue);
+  Writeln;
+  Result := Self;
+end;
+
+function TNxTextReportBuilder.Write(const aKey: string; aValue: Double): INxReportBuilder;
+begin
+  WriteIndent;
+  if aKey = '' then
+    fValue := fValue + FloatToStr(aValue, fInvariantFormat)
+  else
+    fValue := fValue + aKey + ': ' + FloatToStr(aValue, fInvariantFormat);
+  Writeln;
+  Result := Self;
+end;
+
+
+// ***** TNxJsonReportBuilder *****
+
+function TNxJsonReportBuilder.Open(const aKey: string): INxReportBuilder;
+begin
+  if fValue <> '' then
+    begin
+      if not PeekFirst then
+        fValue := fValue + ',';
+      UpdateFirst;
+      Writeln;
+    end;
+  PushFirst;
+  PushScope(stObject, aKey);
+  WriteIndent;
+  if aKey = '' then
+    fValue := fValue + '{'
+  else
+    fValue := fValue + '"' + aKey + '": {';
+  AddIndent;
+  Result := Self;
+end;
+
+function TNxJsonReportBuilder.OpenArray(const aKey: string): INxReportBuilder;
+begin
+  if fValue <> '' then
+    begin
+      if not PeekFirst then
+        fValue := fValue + ',';
+      UpdateFirst;
+      Writeln;
+    end;
+  PushFirst;
+  PushScope(stArray, aKey);
+  WriteIndent;
+  if aKey = '' then
+    fValue := fValue + '['
+  else
+    fValue := fValue + '"' + aKey + '": [';
+  AddIndent;
+  Result := Self;
+end;
+
+function TNxJsonReportBuilder.Close: INxReportBuilder;
+var
+  lScope: TNxBuilderScope;
+begin
+  lScope := PopScope;
+  PopFirst;
+  Writeln;
+  RemoveIndent;
+  WriteIndent;
+  if lScope.Scope = stObject then
+    fValue := fValue + '}'
+  else
+    fValue := fValue + ']';
+  Result := Self;
+end;
+
+function TNxJsonReportBuilder.Write(const aValue: string): INxReportBuilder;
+begin
+  if not PeekFirst then
+    fValue := fValue + ',';
+  UpdateFirst;
+  fValue := fValue + aValue;
+  Result := Self;
+end;
+
+function TNxJsonReportBuilder.Write(const aKey, aValue: string): INxReportBuilder;
+begin
+  if not PeekFirst then
+    fValue := fValue + ',';
+  UpdateFirst;
+  Writeln;
+  WriteIndent;
+  fValue := fValue + '"' + aKey + '": "' + aValue + '"';
+  Result := Self;
+end;
+
+function TNxJsonReportBuilder.Write(const aKey: string; aValue: Boolean): INxReportBuilder;
+begin
+  if not PeekFirst then
+    fValue := fValue + ',';
+  UpdateFirst;
+  if not PeekFirst then
+    fValue := fValue + ',';
+  Writeln;
+  WriteIndent;
+  fValue := fValue + '"' + aKey + '": ' + LowerCase(BoolToStr(aValue, True));
+  Result := Self;
+end;
+
+function TNxJsonReportBuilder.Write(const aKey: string; aValue: Int64): INxReportBuilder;
+begin
+  if not PeekFirst then
+    fValue := fValue + ',';
+  UpdateFirst;
+  Writeln;
+  WriteIndent;
+  fValue := fValue + '"' + aKey + '": ' + IntToStr(aValue);
+  Result := Self;
+end;
+
+function TNxJsonReportBuilder.Write(const aKey: string; aValue: Double): INxReportBuilder;
+begin
+  if not PeekFirst then
+    fValue := fValue + ',';
+  UpdateFirst;
+  Writeln;
+  WriteIndent;
+  fValue := fValue + '"' + aKey + '": ' + FloatToStr(aValue, fInvariantFormat);
   Result := Self;
 end;
 
@@ -430,6 +665,68 @@ constructor TNxFileReporter.Create(const aFileName: string);
 begin
   inherited Create;
   fFileName := aFileName;
+end;
+
+// ***** TNxAIReporter *****
+
+procedure TNxAIReporter.ReportFailures(const aBuilder: INxReportBuilder; const aSummary: INxTestSummary);
+var
+  lResult: INxTestResult;
+  lSummary: INxTestSummary;
+  i: Integer;
+begin
+  for i := 0 to aSummary.ItemCount - 1 do
+    begin
+      lResult := aSummary.Result(i);
+      if Supports(lResult, INxTestSummary, lSummary) then
+        ReportFailures(aBuilder, lSummary)
+      else
+      if lResult.Outcome > TestPass then
+        begin
+          aBuilder
+            .Open('')
+            .Write('name', lResult.Info.FullTestName)
+            .Write('status', NxTestOutcomeText[lResult.Outcome])
+            .Write('duration', lResult.Duration)
+            .Write('message', lResult.ExceptionMsg)
+            .Write('stack_trace', lResult.StackTrace)
+            .Close
+        end;
+    end;
+end;
+
+procedure TNxAIReporter.OnRunEnds(const aTest: INxTest; const aSummary: INxTestSummary);
+var
+  Builder: INxReportBuilder;
+begin
+  Builder := TNxJsonReportBuilder.Create;
+  Builder
+    .Open('')
+    .Open('results')
+    .Open('summary')
+    .Write('tests', aSummary.Total)
+    .Write('passed', aSummary.Passed)
+    .Write('skipped', aSummary.Skipped)
+    .Write('empty', aSummary.Empty)
+    .Write('ignored', aSummary.Ignored)
+    .Write('failed', aSummary.Failed)
+    .Write('errored', aSummary.Errored)
+    .Write('timedout', aSummary.TimedOut)
+    .Write('duration', aSummary.Duration)
+    .Close;
+
+  if aSummary.Outcome > TestPass then
+    begin
+      Builder.OpenArray('tests');
+      ReportFailures(Builder, aSummary);
+      Builder.Close;
+    end;
+
+  Builder
+    .Close
+    .Close;
+
+  Builder.SaveToFile(fFileName);
 end;
 
 end.
