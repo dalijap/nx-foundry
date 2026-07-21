@@ -114,6 +114,8 @@ type
   end;
 
   TNxJsonReportBuilder = class(TNxBaseReportBuilder)
+  protected
+    function EscapeJsonValue(const aValue: string): string;
   public
     function Open(const aKey: string): INxReportBuilder; override;
     function OpenArray(const aKey: string): INxReportBuilder; override;
@@ -410,6 +412,45 @@ end;
 
 // ***** TNxJsonReportBuilder *****
 
+// See https://www.rfc-editor.org/info/rfc8259/
+//
+//  string = quotation-mark *char quotation-mark
+//
+//  char = unescaped /
+//      escape (
+//          %x22 /          ; "    quotation mark  U+0022
+//          %x5C /          ; \    reverse solidus U+005C
+//          %x2F /          ; /    solidus         U+002F
+//          %x62 /          ; b    backspace       U+0008
+//          %x66 /          ; f    form feed       U+000C
+//          %x6E /          ; n    line feed       U+000A
+//          %x72 /          ; r    carriage return U+000D
+//          %x74 /          ; t    tab             U+0009
+//          %x75 4HEXDIG )  ; uXXXX                U+XXXX
+
+function TNxJsonReportBuilder.EscapeJsonValue(const aValue: string): string;
+var
+  i: Integer;
+begin
+  Result := '';
+  for i := 1 to Length(aValue) do
+    case aValue[i] of
+      '"' : Result := Result + '\"';
+      '\' : Result := Result + '\\';
+      '/' : Result := Result + '\/';
+      #8  : Result := Result + '\b';
+      #9  : Result := Result + '\t';
+      #10 : Result := Result + '\n';
+      #12 : Result := Result + '\f';
+      #13 : Result := Result + '\r';
+    else
+      if Ord(aValue[i]) < 32 then
+        Result := Result + '\u00' + IntToHex(Ord(aValue[i]), 2)
+      else
+        Result := Result + aValue[i];
+    end;
+end;
+
 function TNxJsonReportBuilder.Open(const aKey: string): INxReportBuilder;
 begin
   if fValue <> '' then
@@ -482,7 +523,7 @@ begin
   UpdateFirst;
   Writeln;
   WriteIndent;
-  fValue := fValue + '"' + aKey + '": "' + aValue + '"';
+  fValue := fValue + '"' + aKey + '": "' + EscapeJsonValue(aValue) + '"';
   Result := Self;
 end;
 
