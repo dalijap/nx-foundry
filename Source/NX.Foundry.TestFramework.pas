@@ -896,14 +896,31 @@ begin
 end;
 
 procedure TNxBaseTest.Run;
+var
+  lExpected: ExceptClass;
 begin
   try
     NxExpect.ClearExpect;
+    NxExpect.ClearThrown;
     SetUp;
-    Execute;
+    try
+      Execute;
+    except
+      on E: Exception do
+        begin
+          lExpected := NxExpect.ExpectedException;
+          if (E is NxExpect.FailExceptionClass) or not Assigned(lExpected) then
+            raise;
+          if E is lExpected then
+            NxExpect.DoExpect
+          else
+            NxExpect.FailThrow(NxExpect.FormatException(lExpected), NxExpect.FormatException(E));
+        end;
+    end;
     if not NxExpect.ExpectCalled then
       NxExpect.FailEmpty;
   finally
+    NxExpect.ClearThrown;
     AutoPool.Clear;
     // if SetUp fails, TearDown should still run to do a partial cleanup
     TearDown;
