@@ -334,6 +334,22 @@ type
     function EqualTo(const Expected: Currency; const Msg: string = ''): IExpectCurrency;
   end;
 
+  IExpectSingle = interface
+    function IsNot: IExpectSingle;
+    function EqualTo(const Expected: Single; const Msg: string = ''): IExpectSingle; overload;
+    function EqualTo(const Expected: Single; Epsilon: Double; const Msg: string = ''): IExpectSingle; overload;
+  end;
+
+  TExpectSingle = class(TExpectBase, IExpectSingle)
+  private
+    fValue: Single;
+  public
+    constructor Create(const Value: Single);
+    function IsNot: IExpectSingle;
+    function EqualTo(const Expected: Single; const Msg: string = ''): IExpectSingle; overload;
+    function EqualTo(const Expected: Single; Epsilon: Double; const Msg: string = ''): IExpectSingle; overload;
+  end;
+
   IExpectDouble = interface
     function IsNot: IExpectDouble;
     function EqualTo(const Expected: Double; const Msg: string = ''): IExpectDouble; overload;
@@ -528,6 +544,7 @@ function Expect(const Actual: Integer): IExpectInt32; overload;
 function Expect(const Actual: UInt32): IExpectUInt32; overload;
 function Expect(const Actual: Int64): IExpectInt64; overload;
 function Expect(const Actual: UInt64): IExpectUInt64; overload;
+function Expect(const Actual: Single): IExpectSingle; overload;
 function Expect(const Actual: Double): IExpectDouble; overload;
 {$IFDEF DELPHI_XE_UP}
 function Expect(const Actual: TDateTime): IExpectDateTime; overload;
@@ -1319,6 +1336,39 @@ begin
     NxExpect.FailEqualTo(fNot, CurrToStr(fValue), CurrToStr(Expected), Msg);
 end;
 
+// ***** TExpectSingle *****
+
+constructor TExpectSingle.Create(const Value: Single);
+begin
+  fNot := False;
+  fValue := Value;
+end;
+
+function TExpectSingle.IsNot: IExpectSingle;
+begin
+  fNot := True;
+  Result := Self;
+end;
+
+function TExpectSingle.EqualTo(const Expected: Single; const Msg: string): IExpectSingle;
+begin
+  Result := EqualTo(Expected, 0, Msg);
+end;
+
+function TExpectSingle.EqualTo(const Expected: Single; Epsilon: Double; const Msg: string): IExpectSingle;
+var
+  Passed: Boolean;
+begin
+  NxExpect.DoExpect;
+
+  Passed := SameValue(fValue, Expected, Epsilon);
+  if fNot then
+    Passed := not Passed;
+  if not Passed then
+    NxExpect.FailEqualTo(fNot, FloatToStr(fValue), FloatToStr(Expected), Msg);
+  Result := Self;
+end;
+
 // ***** TExpectDouble *****
 
 constructor TExpectDouble.Create(const Value: Double);
@@ -1775,6 +1825,11 @@ end;
 function Expect(const Actual: UInt64): IExpectUInt64;
 begin
   Result := TExpectUInt64.Create(Actual);
+end;
+
+function Expect(const Actual: Single): IExpectSingle;
+begin
+  Result := TExpectSingle.Create(Actual);
 end;
 
 function Expect(const Actual: Double): IExpectDouble;
