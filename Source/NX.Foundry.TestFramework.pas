@@ -200,15 +200,17 @@ type
     function GetDiscoveryMode: Boolean;
     procedure SetDiscoveryMode(aValue: Boolean);
     procedure RunTests(aFilter: TNxTestFilter = nil);
+    procedure Cancel;
     property DiscoveryMode: Boolean read GetDiscoveryMode write SetDiscoveryMode;
   end;
 
   INxTestEngine = interface
     ['{DCA9B585-FB45-4CEC-940B-6AAF71B72790}']
     function Runner: INxTestRunner;
-    function RunOutcome: TNxTestOutcome;
 
     procedure AddReporter(const aReporter: INxTestReporter);
+
+    procedure Start;
 
     procedure NotifyRunStart(const aTest: INxTest; aTotalCount: Integer);
     procedure NotifyRunEnds(const aTest: INxTest; const aSummary: INxTestSummary);
@@ -394,10 +396,13 @@ type
     fEngine: Pointer;
     fFilter: TNxTestFilter;
     fDiscoveryMode: Boolean;
+    {$IFDEF ATTRIBUTES}[volatile]{$ENDIF}
+    fCanceled: Boolean;
     function GetDiscoveryMode: Boolean;
     procedure SetDiscoveryMode(aValue: Boolean);
     property DiscoveryMode: Boolean read GetDiscoveryMode write SetDiscoveryMode;
     function StackTrace(E: Exception): string;
+    procedure InvokeTest(const aTest: INxTest; const aSummary: INxTestSummary); virtual;
     procedure InternalSkipTest(const aTest: INxTest; const aSummary: INxTestSummary); virtual;
     procedure InternalRunTest(const aTest: INxTest; const aSummary: INxTestSummary); virtual;
     procedure InternalRunTests(const aSuite: INxTestSuite; const aSummary: INxTestSummary); overload; virtual;
@@ -406,6 +411,7 @@ type
 
     function ShouldRunTest(const aTest: INxTest): Boolean; virtual;
     procedure RunTests(aFilter: TNxTestFilter = nil);
+    procedure Cancel;
 
     procedure NotifyRunStart(const aTest: INxTest; aTotalCount: Integer);
     procedure NotifyRunEnds(const aTest: INxTest; const aSummary: INxTestSummary);
@@ -423,13 +429,14 @@ type
   protected
     fRunner: INxTestRunner;
     fReporters: TNxTestReporterList;
-    fRunOutcome: TNxTestOutcome;
+    procedure DoRunEnds(const aTest: INxTest; const aSummary: INxTestSummary); virtual;
   public
     constructor Create; virtual;
     destructor Destroy; override;
     function Runner: INxTestRunner;
-    function RunOutcome: TNxTestOutcome;
     procedure AddReporter(const aReporter: INxTestReporter);
+
+    procedure Start; virtual;
 
     procedure NotifyRunStart(const aTest: INxTest; aTotalCount: Integer);
     procedure NotifyRunEnds(const aTest: INxTest; const aSummary: INxTestSummary);
@@ -441,6 +448,14 @@ type
     procedure NotifyTestEnds(const aTest: INxTest; const aResult: INxTestResult);
 
     procedure NotifyStatus(const aTest: INxTest; const aStatusMsg: string; const aResult: INxTestResult);
+  end;
+
+  TNxConsoleTestEngine = class(TNxTestEngine)
+  protected
+    fPause: Boolean;
+    procedure DoRunEnds(const aTest: INxTest; const aSummary: INxTestSummary); override;
+  public
+    constructor Create(aPause: Boolean); reintroduce;
   end;
 
   TNxTestRegistry = class
@@ -461,12 +476,25 @@ type
     class procedure RegisterTests(const aTest: INxTest); overload; {$IFDEF STATIC} static; {$ENDIF}
     class procedure RegisterTests(const aSuite: INxTestSuite); overload; {$IFDEF STATIC} static; {$ENDIF}
     class procedure Discover; {$IFDEF STATIC} static; {$ENDIF}
+    class function Suite: INxTestSuite; {$IFDEF STATIC} static; {$ENDIF}
   end;
+
+// standalone helper functions
+function FormatDuration(aDuration: UInt32): string;
+procedure AddUniqueString(const aValue: string; var aStrings: TNxStringArray);
+procedure RemoveString(const aValue: string; var aStrings: TNxStringArray);
+function ContainsString(const aValue: string; aStrings: TNxStringArray): Boolean;
+function SaveStringToFile(const aFileName, aValue: string): Boolean;
+
 
 const
   NxExitFail = 1;
   NxTestOutcomeLetter: array[TNxTestOutcome] of string = ('-', '.', '?', 'I', 'F', 'E', 'T', 'A');
   NxTestOutcomeText: array[TNxTestOutcome] of string = ('SKIP', 'PASS', 'EMPTY', 'IGNORE', 'FAIL', 'ERROR', 'TIMEOUT', 'ABORT');
+
+// global engine reference, should be initialized only once at application startup
+var
+  Engine: INxTestEngine;
 
 implementation
 
@@ -1092,17 +1120,7 @@ begin
     Result := True;
 end;
 
-procedure TNxTestRunner.InternalSkipTest(const aTest: INxTest; const aSummary: INxTestSummary);
-var
-  lResult: INxTestResult;
-begin
-  NotifyTestStart(aTest);
-  lResult := TNxTestResult.Create(aTest, TestSkip, 0, '', '');
-  aSummary.AddResult(lResult);
-  NotifyTestEnds(aTest, lResult);
-end;
-
-procedure TNxTestRunner.InternalRunTest(const aTest: INxTest; const aSummary: INxTestSummary);
+procedure TNxTestRunner.InvokeTest(const aTest: INxTest; const aSummary: INxTestSummary);
 var
   sw: TStopwatch;
   lResult: INxTestResult;
@@ -1148,17 +1166,58 @@ begin
   NotifyTestEnds(aTest, lResult);
 end;
 
+procedure TNxTestRunner.InternalSkipTest(const aTest: INxTest; const aSummary: INxTestSummary);
+var
+  lResult: INxTestResult;
+begin
+  NotifyTestStart(aTest);
+  lResult := TNxTestResult.Create(aTest, TestSkip, 0, '', '');
+  aSummary.AddResult(lResult);
+  NotifyTestEnds(aTest, lResult);
+end;
+
+{$IFDEF ANONYMOUS_METHODS}
+procedure TNxTestRunner.InternalRunTest(const aTest: INxTest; const aSummary: INxTestSummary);
+begin
+  if TThread.CurrentThread.ThreadID = MainThreadID then
+    InvokeTest(aTest, aSummary)
+  else
+    begin
+      // give main thread some time to run between tests
+      Sleep(10);
+      // execute test in the main thread
+      TThread.Synchronize(nil,
+        procedure
+        begin
+          InvokeTest(aTest, aSummary);
+        end)
+    end;
+end;
+{$ELSE}
+procedure TNxTestRunner.InternalRunTest(const aTest: INxTest; const aSummary: INxTestSummary);
+begin
+  InvokeTest(aTest, aSummary);
+end;
+{$ENDIF}
+
 procedure TNxTestRunner.InternalRunTests(const aSuite: INxTestSuite; const aSummary: INxTestSummary);
 var
   i: Integer;
   lTest: INxTest;
   lSuite: INXTestSuite;
   lSummary: INxTestSummary;
+  lResult: INxTestResult;
 begin
   NotifySuiteStart(aSuite);
 
   for i := 0 to aSuite.ItemCount - 1 do
     begin
+      if fCanceled then
+        begin
+          lResult := TNxTestResult.Create(aSuite, TestIncomplete, 0, '', '');
+          aSummary.AddResult(lResult);
+          Exit;
+        end;
       lTest := aSuite.Test(i);
       if Supports(lTest, INxTestSuite, lSuite) then
         begin
@@ -1198,6 +1257,98 @@ begin
   end;
 end;
 
+procedure TNxTestRunner.Cancel;
+begin
+  fCanceled := True;
+end;
+
+{$IFDEF ANONYMOUS_METHODS}
+procedure TNxTestRunner.NotifyRunStart(const aTest: INxTest; aTotalCount: Integer);
+begin
+  if TThread.CurrentThread.ThreadID = MainThreadID then
+    INxTestEngine(fEngine).NotifyRunStart(aTest, aTotalCount)
+  else
+    TThread.Synchronize(nil,
+      procedure
+      begin
+        INxTestEngine(fEngine).NotifyRunStart(aTest, aTotalCount)
+      end);
+end;
+
+procedure TNxTestRunner.NotifyRunEnds(const aTest: INxTest; const aSummary: INxTestSummary);
+begin
+  fCanceled := False;
+  if TThread.CurrentThread.ThreadID = MainThreadID then
+    INxTestEngine(fEngine).NotifyRunEnds(aTest, aSummary)
+  else
+    TThread.Synchronize(nil,
+      procedure
+      begin
+        INxTestEngine(fEngine).NotifyRunEnds(aTest, aSummary)
+      end);
+end;
+
+procedure TNxTestRunner.NotifySuiteStart(const aTest: INxTest);
+begin
+  if TThread.CurrentThread.ThreadID = MainThreadID then
+    INxTestEngine(fEngine).NotifySuiteStart(aTest)
+  else
+    TThread.Synchronize(nil,
+      procedure
+      begin
+        INxTestEngine(fEngine).NotifySuiteStart(aTest);
+      end);
+end;
+
+procedure TNxTestRunner.NotifySuiteEnds(const aTest: INxTest; const aSummary: INxTestSummary);
+begin
+  if TThread.CurrentThread.ThreadID = MainThreadID then
+    INxTestEngine(fEngine).NotifySuiteEnds(aTest, aSummary)
+  else
+    TThread.Synchronize(nil,
+      procedure
+      begin
+        INxTestEngine(fEngine).NotifySuiteEnds(aTest, aSummary);
+      end);
+end;
+
+procedure TNxTestRunner.NotifyTestStart(const aTest: INxTest);
+begin
+  if TThread.CurrentThread.ThreadID = MainThreadID then
+    INxTestEngine(fEngine).NotifyTestStart(aTest)
+  else
+    TThread.Synchronize(nil,
+      procedure
+      begin
+        INxTestEngine(fEngine).NotifyTestStart(aTest);
+      end);
+end;
+
+procedure TNxTestRunner.NotifyTestEnds(const aTest: INxTest; const aResult: INxTestResult);
+begin
+  if TThread.CurrentThread.ThreadID = MainThreadID then
+    INxTestEngine(fEngine).NotifyTestEnds(aTest, aResult)
+  else
+    TThread.Synchronize(nil,
+      procedure
+      begin
+        INxTestEngine(fEngine).NotifyTestEnds(aTest, aResult);
+      end);
+end;
+
+procedure TNxTestRunner.NotifyStatus(const aTest: INxTest; const aStatusMsg: string; const aResult: INxTestResult);
+begin
+  if TThread.CurrentThread.ThreadID = MainThreadID then
+    INxTestEngine(fEngine).NotifyStatus(aTest, aStatusMsg, aResult)
+  else
+    TThread.Synchronize(nil,
+      procedure
+      begin
+        INxTestEngine(fEngine).NotifyStatus(aTest, aStatusMsg, aResult);
+      end);
+end;
+
+{$ELSE}
 procedure TNxTestRunner.NotifyRunStart(const aTest: INxTest; aTotalCount: Integer);
 begin
   INxTestEngine(fEngine).NotifyRunStart(aTest, aTotalCount);
@@ -1232,6 +1383,7 @@ procedure TNxTestRunner.NotifyStatus(const aTest: INxTest; const aStatusMsg: str
 begin
   INxTestEngine(fEngine).NotifyStatus(aTest, aStatusMsg, aResult);
 end;
+{$ENDIF}
 
 {$IFDEF REGION}
 {$ENDREGION '***** Runner *****'}
@@ -1261,14 +1413,18 @@ begin
   Result := fRunner;
 end;
 
-function TNxTestEngine.RunOutcome: TNxTestOutcome;
-begin
-  Result := fRunOutcome;
-end;
-
 procedure TNxTestEngine.AddReporter(const aReporter: INxTestReporter);
 begin
   fReporters.Add(aReporter);
+end;
+
+procedure TNxTestEngine.Start;
+begin
+  fRunner.RunTests;
+end;
+
+procedure TNxTestEngine.DoRunEnds(const aTest: INxTest; const aSummary: INxTestSummary);
+begin
 end;
 
 procedure TNxTestEngine.NotifyRunStart(const aTest: INxTest; aTotalCount: Integer);
@@ -1285,7 +1441,7 @@ var
 begin
   for i := 0 to fReporters.Count - 1 do
     fReporters[i].OnRunEnds(aTest, aSummary);
-  fRunOutcome := aSummary.Outcome;
+  DoRunEnds(aTest, aSummary);
 end;
 
 procedure TNxTestEngine.NotifySuiteStart(const aTest: INxTest);
@@ -1326,6 +1482,28 @@ var
 begin
   for i := 0 to fReporters.Count - 1 do
     fReporters[i].OnStatus(aTest, aStatusMsg);
+end;
+
+
+// ***** TNxConsoleTestEngine *****
+
+constructor TNxConsoleTestEngine.Create(aPause: Boolean);
+begin
+  inherited Create;
+  fPause := aPause;
+end;
+
+procedure TNxConsoleTestEngine.DoRunEnds(const aTest: INxTest; const aSummary: INxTestSummary);
+begin
+  inherited;
+  // set exit code if not all tests passed
+  if aSummary.Outcome <> TestPass then
+    ExitCode := NxExitFail;
+  if fPause then
+    begin
+      Writeln('Test run completed. Press ENTER to exit.');
+      Readln;
+    end;
 end;
 
 {$IFDEF REGION}
@@ -1386,9 +1564,110 @@ begin
   fNxTestRegistry.Discover;
 end;
 
+class function NxTestRegistry.Suite: INxTestSuite;
+begin
+  Result := fNxTestRegistry.Suite;
+end;
+
 {$IFDEF REGION}
 {$ENDREGION '***** Registry *****'}
 {$ENDIF}
+
+function FormatDuration(aDuration: UInt32): string;
+var
+  h, m, s, ms: UInt32;
+begin
+  h := aDuration div 3600000;
+  aDuration := aDuration mod 3600000;
+  m := aDuration div 60000;
+  aDuration := aDuration mod 60000;
+  s := aDuration div 1000;
+  ms := aDuration mod 1000;
+  Result := Format('%d:%2d:%2d:%3d', [h, m, s, ms]);
+  Result := StringReplace(Result, ' ', '0', [rfReplaceAll]);
+end;
+
+procedure AddUniqueString(const aValue: string; var aStrings: TNxStringArray);
+begin
+  if not ContainsString(aValue, aStrings) then
+    begin
+      SetLength(aStrings, Length(aStrings) + 1);
+      aStrings[High(aStrings)] := aValue;
+    end;
+end;
+
+procedure RemoveString(const aValue: string; var aStrings: TNxStringArray);
+var
+  i: Integer;
+begin
+  for i := 0 to High(aStrings) do
+    if aValue = aStrings[i] then
+      begin
+        if i < High(aStrings) then
+          aStrings[i] := aStrings[High(aStrings)];
+        SetLength(aStrings, Length(aStrings) - 1);
+        Break;
+      end;
+end;
+
+function ContainsString(const aValue: string; aStrings: TNxStringArray): Boolean;
+var
+  i: Integer;
+begin
+  Result := False;
+  for i := 0 to High(aStrings) do
+    if aValue = aStrings[i] then
+      begin
+        Result := True;
+        Break;
+      end;
+end;
+
+function SaveStringToFile(const aFileName, aValue: string): Boolean;
+var
+  f: TFileStream;
+  Size: Integer;
+  u: UTF8String;
+begin
+  try
+    f := TFileStream.Create(aFileName, fmCreate or fmShareExclusive);
+    try
+      u := UTF8Encode(aValue);
+      Size := Length(u);
+      if Size > 0 then
+        f.WriteBuffer(u[1], Size);
+      Result := True;
+    finally
+      f.Free;
+    end;
+  except
+    Result := False;
+  end;
+end;
+
+function LoadStringFromFile(const aFileName: string; var aValue: string): Boolean;
+var
+  f: TFileStream;
+  Size: Integer;
+  u: UTF8String;
+begin
+  aValue := '';
+  try
+    f := TFileStream.Create(aFileName, fmOpenRead);
+    try
+      Size := f.Size;
+      SetLength(u, Size);
+      if Size > 0 then
+        f.ReadBuffer(u[1], Size);
+      aValue := UTF8Decode(u);
+      Result := True;
+    finally
+      f.Free;
+    end;
+  except
+    Result := False;
+  end;
+end;
 
 initialization
 

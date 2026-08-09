@@ -34,8 +34,9 @@ interface
 {$W-}
 
 uses
-  Nx.Foundry.TestFramework,
-  TestInsight.Client;
+  // TestInsight must be initialized first
+  TestInsight.Client,
+  Nx.Foundry.TestFramework;
 
 type
   TNxTestInsightEngine = class(TNxTestEngine)
@@ -43,7 +44,8 @@ type
     fClient: ITestInsightClient;
     fSelectedTests: TNxStringArray;
   public
-    constructor Create(const BaseUrl: string); reintroduce;
+    constructor Create(const BaseUrl: string = DefaultUrl); reintroduce;
+    procedure Start; override;
     function TestSelected(const aTest: INxTest): Boolean;
   end;
 
@@ -67,8 +69,6 @@ type
     procedure OnStatus(const aTest: INxTest; const aStatusMsg: string);
   end;
 
-procedure RunRegisteredTests(const BaseUrl: string = DefaultUrl);
-
 implementation
 
 { TNxTestInsightEngine }
@@ -76,24 +76,24 @@ implementation
 constructor TNxTestInsightEngine.Create(const BaseUrl: string);
 begin
   inherited Create;
+  NxTestRegistry.Discover;
   fClient := TTestInsightRestClient.Create(BaseUrl);
   AddReporter(TNxTestInsightReporter.Create(fClient));
   fRunner.DiscoveryMode := not fClient.Options.ExecuteTests;
   fSelectedTests := fClient.GetTests;
 end;
 
-function TNxTestInsightEngine.TestSelected(const aTest: INxTest): Boolean;
-var
-  i: Integer;
+procedure TNxTestInsightEngine.Start;
 begin
+  Runner.RunTests(TestSelected);
+end;
+
+function TNxTestInsightEngine.TestSelected(const aTest: INxTest): Boolean;
+begin
+  // if selected tests array is empty, treat all tests as selected
   Result := Length(fSelectedTests) = 0;
   if not Result then
-    for i := 0 to High(fSelectedTests) do
-      if aTest.TestPath + '.' + aTest.TestName = fSelectedTests[i] then
-        begin
-          Result := True;
-          Break;
-        end;
+    Result := ContainsString(aTest.TestPath + '.' + aTest.TestName, fSelectedTests);
 end;
 
 { TNxTestInsightReporter }
@@ -158,16 +158,6 @@ end;
 procedure TNxTestInsightReporter.OnStatus(const aTest: INxTest; const aStatusMsg: string);
 begin
 
-end;
-
-var
-  Engine: INxTestEngine;
-
-procedure RunRegisteredTests(const BaseUrl: string);
-begin
-  NxTestRegistry.Discover;
-  Engine := TNxTestInsightEngine.Create(BaseUrl);
-  Engine.Runner.RunTests(TNxTestInsightEngine(Engine).TestSelected);
 end;
 
 end.

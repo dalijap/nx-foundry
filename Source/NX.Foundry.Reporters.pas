@@ -173,28 +173,6 @@ type
 
 implementation
 
-function SaveStringToFile(const aFileName, aValue: string): Boolean;
-var
-  f: TFileStream;
-  Size: Integer;
-  u: UTF8String;
-begin
-  try
-    f := TFileStream.Create(aFileName, fmCreate or fmShareExclusive);
-    try
-      u := UTF8Encode(aValue);
-      Size := Length(u);
-      if Size > 0 then
-        f.WriteBuffer(u[1], Size);
-      Result := True;
-    finally
-      f.Free;
-    end;
-  except
-    Result := False;
-  end;
-end;
-
 // ***** TNxBaseReportBuilder *****
 
 constructor TNxBaseReportBuilder.Create;
@@ -673,7 +651,7 @@ begin
     .Write('----------------------------------------------------')
 
     .Indent
-    .Write(Format('Total Time: %d ms', [aSummary.Duration]))
+    .Write(Format('Total Time: %s', [FormatDuration(aSummary.Duration)]))
     .Outdent
     .Write('====================================================')
     .Writeln;

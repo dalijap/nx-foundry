@@ -215,6 +215,7 @@
 {$IF CompilerVersion >= 17.0}  
   {$DEFINE REGIONS}
   {$DEFINE STATIC}
+  {$DEFINE VCL_PADDING}
 {$IFEND}
 
 // enhanced records support
@@ -229,6 +230,11 @@
   {$DEFINE GENERICS}
   {$DEFINE STACKTRACE}  
   {$DEFINE RTTIEX}  
+{$IFEND}
+
+// attributes
+{$IF CompilerVersion >= 21.0}
+  {$DEFINE ATTRIBUTES}
 {$IFEND}
 
 // format settings 

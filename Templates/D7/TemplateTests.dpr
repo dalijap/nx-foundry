@@ -2,7 +2,11 @@ program TemplateTests;
 
 {$DEFINE CONSOLE_TESTRUNNER}
 
-// {$DEFINE CLI}
+{$IFNDEF CONSOLE_TESTRUNNER}
+  {$DEFINE GUI_TESTRUNNER}
+{$ENDIF }
+
+// {$DEFINE CI}
 
 {$IFDEF CONSOLE_TESTRUNNER}
   {$APPTYPE CONSOLE}
@@ -10,25 +14,28 @@ program TemplateTests;
 
 uses
   SysUtils,
+  {$IFDEF GUI_TESTRUNNER}
+  NX.Foundry.VclEngine,
+  {$ENDIF}
   NX.Foundry.Reporters,
   NX.Foundry.TestFramework,
   TemplateSuites;
 
 {$R *.res}
 
-var
-  Engine: INxTestEngine;
 begin
-  Engine := TNxTestEngine.Create;
+  {$IFDEF CONSOLE_TESTRUNNER}
+  {$IFDEF CI}
+  Engine := TNxConsoleTestEngine.Create(False);
+  {$ELSE}
+  Engine := TNxConsoleTestEngine.Create(True);
+  {$ENDIF}
   // add as many reporters as needed
   Engine.AddReporter(TNxConsoleReporter.Create);
-  // run tests
-  Engine.Runner.RunTests;
-  // set exit code if not all tests passed
-  if Engine.RunOutcome <> TestPass then
-    ExitCode := NxExitFail;
-  {$IFNDEF CLI}
-  Readln;
+  {$ELSE}
+  Engine := TNxGuiTestEngine.Create;
+  Engine.AddReporter(TNxTestApp.Create);
   {$ENDIF}
+  Engine.Start;
 end.
 
