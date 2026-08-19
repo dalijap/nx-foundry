@@ -933,6 +933,7 @@ begin
     SetUp;
     try
       Execute;
+      NxExpect.VerifyThrown;
     except
       on E: Exception do
         begin
