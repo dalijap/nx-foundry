@@ -49,4 +49,10 @@ Tested on the following versions:
 
 ---
 
+**Please support my work** 
+
+https://www.paypal.com/ncp/payment/CVVVLKZD9246J
+
+---
+
 [https://dalija.prasnikar.info](https://dalija.prasnikar.info)
