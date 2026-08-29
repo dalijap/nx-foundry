@@ -75,6 +75,11 @@ type
     TestIgnore,
 
     ///	<summary>
+    ///	  Test had memory leaks
+    ///	</summary>
+    TestLeak,
+
+    ///	<summary>
     ///	  Test verification failed
     ///	</summary>
     TestFail,
@@ -122,6 +127,7 @@ type
     function GetSkipped: Integer;
     function GetEmpty: Integer;
     function GetIgnored: Integer;
+    function GetLeaked: Integer;
     function GetFailed: Integer;
     function GetErrored: Integer;
     function GetTimedOut: Integer;
@@ -136,6 +142,7 @@ type
     property Skipped: Integer read GetSkipped;
     property Empty: Integer read GetEmpty;
     property Ignored: Integer read GetIgnored;
+    property Leaked: Integer read GetLeaked;
     property Failed: Integer read GetFailed;
     property Errored: Integer read GetErrored;
     property TimedOut: Integer read GetTimedOut;
@@ -289,6 +296,7 @@ type
     fSkipped: Integer;
     fEmpty: Integer;
     fIgnored: Integer;
+    fLeaked: Integer;
     fFailed: Integer;
     fErrored: Integer;
     fTimedOut: Integer;
@@ -298,6 +306,7 @@ type
     function GetSkipped: Integer;
     function GetEmpty: Integer;
     function GetIgnored: Integer;
+    function GetLeaked: Integer;
     function GetFailed: Integer;
     function GetErrored: Integer;
     function GetTimedOut: Integer;
@@ -313,6 +322,7 @@ type
     property Skipped: Integer read GetSkipped;
     property Empty: Integer read GetEmpty;
     property Ignored: Integer read GetIgnored;
+    property Leaked: Integer read GetLeaked;
     property Failed: Integer read GetFailed;
     property Errored: Integer read GetErrored;
     property TimedOut: Integer read GetTimedOut;
@@ -489,8 +499,8 @@ function SaveStringToFile(const aFileName, aValue: string): Boolean;
 
 const
   NxExitFail = 1;
-  NxTestOutcomeLetter: array[TNxTestOutcome] of string = ('-', '.', '?', 'I', 'F', 'E', 'T', 'A');
-  NxTestOutcomeText: array[TNxTestOutcome] of string = ('SKIP', 'PASS', 'EMPTY', 'IGNORE', 'FAIL', 'ERROR', 'TIMEOUT', 'ABORT');
+  NxTestOutcomeLetter: array[TNxTestOutcome] of string = ('-', '.', '?', 'I', 'L', 'F', 'E', 'T', 'A');
+  NxTestOutcomeText: array[TNxTestOutcome] of string = ('SKIP', 'PASS', 'EMPTY', 'IGNORE', 'LEAK', 'FAIL', 'ERROR', 'TIMEOUT', 'ABORT');
 
 // global engine reference, should be initialized only once at application startup
 var
@@ -619,6 +629,11 @@ begin
   Result := fIgnored;
 end;
 
+function TNxTestSummary.GetLeaked: Integer;
+begin
+  Result := fLeaked;
+end;
+
 function TNxTestSummary.GetFailed: Integer;
 begin
   Result := fFailed;
@@ -661,6 +676,9 @@ begin
   if fFailed > 0 then
     Result := TestFail
   else
+  if fLeaked > 0 then
+    Result := TestLeak
+  else
   if fIgnored > 0 then
     Result := TestIgnore
   else
@@ -682,6 +700,7 @@ begin
       Inc(fSkipped, lSummary.Skipped);
       Inc(fEmpty, lSummary.Empty);
       Inc(fIgnored, lSummary.Ignored);
+      Inc(fLeaked, lSummary.Leaked);
       Inc(fFailed, lSummary.Failed);
       Inc(fErrored, lSummary.Errored);
       Inc(fTimedOut, lSummary.TimedOut);
@@ -702,6 +721,7 @@ begin
         TestPass : Inc(fPassed);
         TestEmpty : Inc(fEmpty);
         TestIgnore : Inc(fIgnored);
+        TestLeak : Inc(fLeaked);
         TestFail : Inc(fFailed);
         TestError : Inc(fErrored);
         TestTimeout : Inc(fTimedOut);

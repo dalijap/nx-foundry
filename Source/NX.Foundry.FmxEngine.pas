@@ -141,6 +141,7 @@ const
     TAlphaColorRec.Green,
     TAlphaColorRec.Gold,
     TAlphaColorRec.Gray,
+    TAlphaColorRec.Royalblue,
     TAlphaColorRec.Crimson,
     TAlphaColorRec.Crimson,
     TAlphaColorRec.Darkviolet,
@@ -222,7 +223,7 @@ begin
           Canvas.FillText(R, '!', False, 1, [], TTextAlign.Center, TTextAlign.Center);
         end;
 
-      TestIgnore, TestFail, TestTimeout :
+      TestIgnore, TestLeak, TestFail, TestTimeout :
         begin
           R.Inflate(0, -3);
           Path.AddEllipse(R);

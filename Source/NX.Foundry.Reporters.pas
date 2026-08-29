@@ -615,7 +615,9 @@ begin
     TestPass : OutcomeMsg := 'Succesfully completed!';
     TestSkip : OutcomeMsg := 'No tests were executed!';
     TestEmpty : OutcomeMsg := 'Some tests were executed wihtout any verifications!';
-    TestFail :  OutcomeMsg := 'Some tests failed!';
+    TestIgnore : OutcomeMsg := 'Some tests were ignored!';
+    TestLeak : OutcomeMsg := 'Some tests had memory leaks!';
+    TestFail : OutcomeMsg := 'Some tests failed!';
     TestError : OutcomeMsg := 'Unexpected error occured!';
     TestTimeout : OutcomeMsg := 'Timeout occured!';
     TestIncomplete : OutcomeMsg := 'Test run was incomplete!';
@@ -644,6 +646,7 @@ begin
     .Write(Format('Skipped:    %d', [aSummary.Skipped]))
     .Write(Format('Empty:      %d', [aSummary.Empty]))
     .Write(Format('Ignored:    %d', [aSummary.Ignored]))
+    .Write(Format('Leaked:     %d', [aSummary.Leaked]))
     .Write(Format('Failed:     %d', [aSummary.Failed]))
     .Write(Format('Errored:    %d', [aSummary.Errored]))
     .Write(Format('Timed Out:  %d', [aSummary.TimedOut]))
@@ -728,6 +731,7 @@ begin
     .Write('skipped', aSummary.Skipped)
     .Write('empty', aSummary.Empty)
     .Write('ignored', aSummary.Ignored)
+    .Write('leaked', aSummary.Leaked)
     .Write('failed', aSummary.Failed)
     .Write('errored', aSummary.Errored)
     .Write('timedout', aSummary.TimedOut)

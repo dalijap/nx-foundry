@@ -139,6 +139,7 @@ begin
     TestPass : lResultType := TResultType.Passed;
     TestEmpty : lResultType := TResultType.Warning;
     TestIgnore : lResultType := TResultType.Failed;
+    TestLeak : lResultType := TResultType.Warning;
     TestFail : lResultType := TResultType.Failed;
     TestError : lResultType := TResultType.Error;
     TestTimeout : lResultType := TResultType.Failed;

@@ -113,6 +113,7 @@ const
     $008000, // TAlphaColorRec.Green
     $00D7FF, // TAlphaColorRec.Gold
     $808080, // TAlphaColorRec.Gray
+    $E16941, // TAlphaColorRec.RoyalBlue
     $3C14DC, // TAlphaColorRec.Crimson
     $3C14DC, // TAlphaColorRec.Crimson
     $D30094, // TAlphaColorRec.Darkviolet
@@ -208,7 +209,7 @@ begin
       Result.Canvas.TextOut(7, 2, s);
     end;
 
-    TestIgnore, TestFail, TestTimeout:
+    TestIgnore, TestLeak, TestFail, TestTimeout:
     begin
       Result.Canvas.Ellipse(R.Left, R.Top, R.Right, R.Bottom);
       Result.Canvas.Brush.Style := bsClear;
