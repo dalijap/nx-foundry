@@ -45,6 +45,7 @@ uses
   FMX.Objects,
   FMX.Graphics,
   FMX.Controls,
+  FMX.DialogService,
   FMX.Forms,
   FMX.StdCtrls,
   FMX.TreeView,
@@ -89,8 +90,6 @@ type
   TMainForm = class(TForm);
 
   TNxTestApp = class(TInterfacedObject, INxTestReporter)
-  private
-    procedure SetRunning(const Value: Boolean);
   protected
     fConfig: TNxTestConfig;
     fForm: TMainForm;
@@ -105,17 +104,22 @@ type
     fScoreProgress: TProgressBar;
     fProgress: TProgressBar;
     fTestNodes: TDictionary<string, TTestTreeItem>;
+    fDisabledTests: TNxStringArray;
     fSelectedTests: TNxStringArray;
     [volatile] fFormInitialized: Boolean;
     [volatile] fRunning: Boolean;
     procedure OnIdle(Sender: TObject; var Done: Boolean);
     procedure CreateUserInterface;
+    procedure OnFormCloseQuery(Sender: TObject; var CanClose: Boolean);
 
     procedure BuildTreeRecursive(AParentNode: TControl; aSuite: INxTestSuite);
     procedure RunAll(Sender: TObject);
     procedure RunSelected(Sender: TObject);
     procedure CancelRun(Sender: TObject);
+    function TestChecked(const aTest: INxTest): Boolean;
     function TestSelected(const aTest: INxTest): Boolean;
+    procedure UpdateTestSelection;
+    procedure SetRunning(const Value: Boolean);
     property Running: Boolean read fRunning write SetRunning;
   public
     constructor Create;
@@ -345,7 +349,9 @@ begin
   fFormInitialized := True;
 
   fConfig.LoadFromFile;
-  fSelectedTests := fConfig.SelectedTests;
+  fDisabledTests := fConfig.DisabledTests;
+
+  fForm.OnCloseQuery := OnFormCloseQuery;
 
   fToolBar := TLayout.Create(fForm);
   fToolBar.Align := TAlignLayout.Top;
@@ -432,7 +438,6 @@ begin
     end);
 end;
 
-
 procedure TNxTestApp.BuildTreeRecursive(aParentNode: TControl; aSuite: INxTestSuite);
 var
   lSuiteNode, lNode: TTestTreeItem;
@@ -442,7 +447,7 @@ var
 begin
   lSuiteNode := TTestTreeItem.Create(fTreeView);
   lSuiteNode.TestName := aSuite.TestName;
-  lSuiteNode.IsChecked := TestSelected(aSuite);
+  lSuiteNode.IsChecked := TestChecked(aSuite);
   lSuiteNode.Parent := aParentNode;
   lSuiteNode.TagString := aSuite.FullTestName;
   fTestNodes.TryAdd(aSuite.FullTestName, lSuiteNode);
@@ -458,12 +463,32 @@ begin
       begin
         lNode := TTestTreeItem.Create(fTreeView);
         lNode.TestName := lTest.TestName;
-        lNode.IsChecked := TestSelected(lTest);
+        lNode.IsChecked := TestChecked(lTest);
         lNode.Parent := lSuiteNode;
         lNode.TagString := lTest.FullTestName;
         fTestNodes.TryAdd(lTest.FullTestName, lNode);
       end;
   end;
+end;
+
+procedure TNxTestApp.OnFormCloseQuery(Sender: TObject; var CanClose: Boolean);
+begin
+  CanClose := not Running;
+  if CanClose then
+    UpdateTestSelection
+  else
+    TDialogService.MessageDialog('Test suite is running? Do you want to force close?',
+      TMsgDlgType.mtWarning, [TMsgDlgBtn.mbYes, TMsgDlgBtn.mbNo], TMsgDlgBtn.mbNo, 0,
+      procedure(const AResult: TModalResult)
+      begin
+        if AResult = mrYes then
+          Application.Terminate;
+      end);
+end;
+
+function TNxTestApp.TestChecked(const aTest: INxTest): Boolean;
+begin
+  Result := not ContainsString(aTest.FullTestName, fDisabledTests);
 end;
 
 function TNxTestApp.TestSelected(const aTest: INxTest): Boolean;
@@ -472,6 +497,42 @@ begin
   Result := Length(fSelectedTests) = 0;
   if not Result then
     Result := ContainsString(aTest.FullTestName, fSelectedTests);
+end;
+
+procedure TNxTestApp.UpdateTestSelection;
+
+procedure SelectRecursive(aNode: TTreeViewItem);
+var
+  i: Integer;
+begin
+  AddUniqueString(aNode.TagString, fSelectedTests);
+  for i := 0 to aNode.Count - 1 do
+    if aNode.Items[i].IsChecked then
+      SelectRecursive(aNode.Items[i]);
+end;
+
+var
+  i: Integer;
+  lNode: TTreeViewItem;
+begin
+  SetLength(fSelectedTests, 0);
+  SetLength(fDisabledTests, 0);
+  for i := 0 to fTreeView.GlobalCount - 1 do
+    begin
+      lNode := fTreeView.ItemByGlobalIndex(i);
+      TTestTreeItem(lNode).Status := TestSkip;
+      if not lNode.IsChecked then
+        AddUniqueString(lNode.TagString, fDisabledTests);
+    end;
+  if Length(fDisabledTests) > 0 then
+    begin
+      for i := 0 to fTreeView.Count - 1 do
+        if fTreeView.Items[i].IsChecked then
+          SelectRecursive(fTreeView.Items[i]);
+    end;
+
+  fConfig.DisabledTests := fDisabledTests;
+  fConfig.SaveToFile;
 end;
 
 procedure TNxTestApp.RunAll(Sender: TObject);
@@ -493,45 +554,9 @@ begin
 end;
 
 procedure TNxTestApp.RunSelected(Sender: TObject);
-
-procedure SelectRecursive(aParentNode: TTreeViewItem);
-var
-  i: Integer;
-begin
-  AddUniqueString(aParentNode.TagString, fSelectedTests);
-  for i := 0 to aParentNode.Count - 1 do
-    if aParentNode.Items[i].IsChecked then
-      begin
-        AddUniqueString(aParentNode.Items[i].TagString, fSelectedTests);
-        SelectRecursive(aParentNode.Items[i]);
-      end;
-end;
-
-var
-  i: Integer;
-  HasUnchecked: Boolean;
-  lNode: TTreeViewItem;
 begin
   Running := True;
-
-  SetLength(fSelectedTests, 0);
-  HasUnchecked := False;
-  for i := 0 to fTreeView.GlobalCount - 1 do
-    begin
-      lNode := fTreeView.ItemByGlobalIndex(i);
-      TTestTreeItem(lNode).Status := TestSkip;
-      if not lNode.IsChecked then
-        HasUnchecked := True;
-    end;
-  if HasUnchecked then
-    begin
-      for i := 0 to fTreeView.Count - 1 do
-        if fTreeView.Items[i].IsChecked then
-          SelectRecursive(fTreeView.Items[i]);
-    end;
-  fConfig.SelectedTests := fSelectedTests;
-  fConfig.SaveToFile;
-
+  UpdateTestSelection;
   TTask.Run(
     procedure
     begin

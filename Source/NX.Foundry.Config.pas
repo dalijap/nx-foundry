@@ -52,12 +52,12 @@ type
   TNxTestConfig = class
   protected
     fFileName: string;
-    fSelectedTests: TNxStringArray;
+    fDisabledTests: TNxStringArray;
   public
     constructor Create(const aFileName: string);
     procedure LoadFromFile;
     procedure SaveToFile;
-    property SelectedTests: TNxStringArray read fSelectedTests write fSelectedTests;
+    property DisabledTests: TNxStringArray read fDisabledTests write fDisabledTests;
   end;
 
 implementation
@@ -78,7 +78,7 @@ var
   sl: TStringList;
   i: integer;
 begin
-  SetLength(fSelectedTests, 0);
+  SetLength(fDisabledTests, 0);
   if FileExists(fFileName) then
     try
       lDoc := TXMLDocument.Create(nil);
@@ -87,13 +87,13 @@ begin
         lConfig := lDoc.Node.ChildNodes.FindNode('config');
       if Assigned(lConfig) and (lConfig.NodeName = 'config') then
         begin
-          lValue := VarToStr(lConfig.ChildValues['selected_tests']);
+          lValue := VarToStr(lConfig.ChildValues['disabled_tests']);
           sl := TStringList.Create;
           try
             sl.Text := lValue;
-            SetLength(fSelectedTests, sl.Count);
-            for i := 0 to High(fSelectedTests) do
-              fSelectedTests[i] := sl[i];
+            SetLength(fDisabledTests, sl.Count);
+            for i := 0 to High(fDisabledTests) do
+              fDisabledTests[i] := sl[i];
           finally
             sl.Free;
           end;
@@ -114,12 +114,12 @@ begin
     lDoc.Active := True;
     lDoc.Options := [doNodeAutoIndent];
     lConfig := lDoc.AddChild('config');
-    lTests := lConfig.AddChild('selected_tests');
-    for i := 0 to High(fSelectedTests) do
+    lTests := lConfig.AddChild('disabled_tests');
+    for i := 0 to High(fDisabledTests) do
       if i = 0 then
-        lValue := fSelectedTests[i]
+        lValue := fDisabledTests[i]
       else
-        lValue := lValue + #13#10 + fSelectedTests[i];
+        lValue := lValue + #13#10 + fDisabledTests[i];
     lTests.NodeValue := lValue;
     lDoc.SaveToFile(fFileName);
   except
