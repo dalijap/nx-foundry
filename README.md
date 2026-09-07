@@ -19,7 +19,7 @@ implemented yet, and APIs and behaviors are subject to change.
 + Cross-platform
 + Support for old, pre-Unicode Delphi versions
 + Support for new features and new Delphi versions
-+ Console and GUI engine (GUI support to be developed)
++ Console and GUI (VCL and FMX) engines 
 + Support for TestInsight
 + Tests are derived from the base `TNxTestCase` class or its alias `TTestCase`
 + It is also possible to register test cases using classes which implement
