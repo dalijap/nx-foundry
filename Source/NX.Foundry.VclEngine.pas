@@ -464,6 +464,7 @@ begin
   fTreeView.CheckBoxes := True;
   fTreeView.Images := fImages;
   fTreeView.OnCreateNodeClass := OnCreateNodeClass;
+  fTreeView.DoubleBuffered := True;
 
   fStatusBar := TStatusBar.Create(fForm);
   fStatusBar.Align := alBottom;
