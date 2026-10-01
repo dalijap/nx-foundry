@@ -359,6 +359,9 @@ type
     property TestName: string read GetTestName;
     property FullTestName: string read GetFullTestName;
     property TestClass: TClass read GetTestClass;
+  public
+    class function ClassFullTestName(aClass: TClass; aMethod: Pointer): string; overload; {$IFDEF STATIC} static; {$ENDIF}
+    class function ClassFullTestName(aClass: TClass; const aMethodName: string): string; overload; {$IFDEF STATIC} static; {$ENDIF}
   end;
 
   {$M+}
@@ -413,7 +416,7 @@ type
     property DiscoveryMode: Boolean read GetDiscoveryMode write SetDiscoveryMode;
     function StackTrace(E: Exception): string;
     procedure InvokeTest(const aTest: INxTest; const aSummary: INxTestSummary); virtual;
-    procedure InternalSkipTest(const aTest: INxTest; const aSummary: INxTestSummary); virtual;
+    procedure InternalSkipTest(const aTest: INxTest; aOutcome: TNxTestOutcome; const aSummary: INxTestSummary); virtual;
     procedure InternalRunTest(const aTest: INxTest; const aSummary: INxTestSummary); virtual;
     procedure InternalRunTests(const aSuite: INxTestSuite; const aSummary: INxTestSummary); overload; virtual;
   public
@@ -471,11 +474,16 @@ type
   TNxTestRegistry = class
   protected
     fSuite: INxTestSuite;
+    fIgnoredTests: TStringList;
   public
     constructor Create;
+    destructor Destroy; override;
     procedure RegisterTests(const aTestClass: TNxTestCaseClass); overload;
     procedure RegisterTests(const aTest: INxTest); overload;
     procedure RegisterTests(const aSuite: INxTestSuite); overload;
+    procedure IgnoreTest(const aTestClass: TNxTestCaseClass; aMethod: Pointer);
+    procedure IgnoreTests(const aTestClass: TNxTestCaseClass);
+    function IsTestIgnored(const aTestName: string): Boolean;
     procedure Discover;
     property Suite: INxTestSuite read fSuite;
   end;
@@ -485,6 +493,11 @@ type
     class procedure RegisterTests(const aTestClass: TNxTestCaseClass); overload; {$IFDEF STATIC} static; {$ENDIF}
     class procedure RegisterTests(const aTest: INxTest); overload; {$IFDEF STATIC} static; {$ENDIF}
     class procedure RegisterTests(const aSuite: INxTestSuite); overload; {$IFDEF STATIC} static; {$ENDIF}
+    // Ignores single published test method from a test class
+    class procedure IgnoreTest(const aTestClass: TNxTestCaseClass; aMethod: Pointer); {$IFDEF STATIC} static; {$ENDIF}
+    // Ignores all published test methods from a test class
+    class procedure IgnoreTests(const aTestClass: TNxTestCaseClass); {$IFDEF STATIC} static; {$ENDIF}
+    class function IsTestIgnored(const aTestName: string): Boolean; {$IFDEF STATIC} static; {$ENDIF}
     class procedure Discover; {$IFDEF STATIC} static; {$ENDIF}
     class function Suite: INxTestSuite; {$IFDEF STATIC} static; {$ENDIF}
   end;
@@ -874,6 +887,47 @@ begin
   end;
 end;
 
+function PublishedMethodName(aClass: TClass; aMethod: Pointer): string;
+var
+  Current: TClass;
+  MethodTablePtr: Pointer;
+  MethodCount: Word;
+  Entry: PMethRec;
+  Name: ^ShortString;
+begin
+  Result := '';
+  Entry := nil;
+  Current := aClass;
+  while Assigned(Current) do
+    begin
+      // get the pointer to method table
+      MethodTablePtr := PPointer(NativeInt(PByte(Current)) + vmtMethodTable)^;
+      if Assigned(MethodTablePtr) then
+        begin
+          MethodCount := PWord(MethodTablePtr)^;
+          // get pointer to the first method
+          // Entry is accessed only if method count is > 0
+          Inc(PWord(MethodTablePtr));
+          Entry := MethodTablePtr;
+        end
+      else
+        MethodCount := 0;
+
+      while MethodCount > 0 do
+        begin
+          Name := @Entry^.nameLen;
+          if Entry^.methAddr = aMethod then
+            begin
+              Result := string(Name^);
+              Exit;
+            end;
+          Dec(MethodCount);
+          Entry := Pointer(NativeUInt(PByte(Entry)) + Entry.recSize);
+        end;
+
+      Current := Current.ClassParent;
+    end;
+end;
 
 // ***** TNxBaseTest *****
 
@@ -974,6 +1028,26 @@ begin
     // if SetUp fails, TearDown should still run to do a partial cleanup
     TearDown;
   end;
+end;
+
+class function TNxBaseTest.ClassFullTestName(aClass: TClass; aMethod: Pointer): string;
+begin
+  {$IFDEF RTTIEX}
+  Result := aClass.UnitName + '.' + aClass.ClassName;
+  {$ELSE}
+  Result := aClass.ClassName;
+  {$ENDIF}
+  Result := Result + '.' + PublishedMethodName(aClass, aMethod);
+end;
+
+class function TNxBaseTest.ClassFullTestName(aClass: TClass; const aMethodName: string): string;
+begin
+  {$IFDEF RTTIEX}
+  Result := aClass.UnitName + '.' + aClass.ClassName;
+  {$ELSE}
+  Result := aClass.ClassName;
+  {$ENDIF}
+  Result := Result + '.' + aMethodName;
 end;
 
 // ***** TNxTestCase *****
@@ -1187,12 +1261,12 @@ begin
   NotifyTestEnds(aTest, lResult);
 end;
 
-procedure TNxTestRunner.InternalSkipTest(const aTest: INxTest; const aSummary: INxTestSummary);
+procedure TNxTestRunner.InternalSkipTest(const aTest: INxTest; aOutcome: TNxTestOutcome; const aSummary: INxTestSummary);
 var
   lResult: INxTestResult;
 begin
   NotifyTestStart(aTest);
-  lResult := TNxTestResult.Create(aTest, TestSkip, 0, '', '');
+  lResult := TNxTestResult.Create(aTest, aOutcome, 0, '', '');
   aSummary.AddResult(lResult);
   NotifyTestEnds(aTest, lResult);
 end;
@@ -1250,12 +1324,15 @@ begin
         begin
           if fDiscoveryMode then
             // discovery mode is the same as skipping
-            InternalSkipTest(lTest, aSummary)
+            InternalSkipTest(lTest, TestSkip, aSummary)
+          else
+          if NxTestRegistry.IsTestIgnored(lTest.FullTestName) then
+            InternalSkipTest(lTest, TestIgnore, aSummary)
           else
           if ShouldRunTest(lTest) then
             InternalRunTest(lTest, aSummary)
           else
-            InternalSkipTest(lTest, aSummary)
+            InternalSkipTest(lTest, TestSkip, aSummary)
         end;
     end;
   NotifySuiteEnds(aSuite, aSummary);
@@ -1541,6 +1618,15 @@ constructor TNxTestRegistry.Create;
 begin
   inherited;
   fSuite := TNxTestSuite.Create(ExtractFileName(ParamStr(0)));
+  fIgnoredTests := TStringList.Create;
+  fIgnoredTests.Sorted := True;
+  fIgnoredTests.Duplicates := dupIgnore;
+end;
+
+destructor TNxTestRegistry.Destroy;
+begin
+  fIgnoredTests.Free;
+  inherited;
 end;
 
 procedure TNxTestRegistry.RegisterTests(const aTestClass: TNxTestCaseClass);
@@ -1563,6 +1649,28 @@ begin
   fSuite.Discover;
 end;
 
+procedure TNxTestRegistry.IgnoreTest(const aTestClass: TNxTestCaseClass; aMethod: Pointer);
+begin
+  fIgnoredTests.Add(aTestClass.ClassFullTestName(aTestClass, aMethod));
+end;
+
+procedure TNxTestRegistry.IgnoreTests(const aTestClass: TNxTestCaseClass);
+var
+  lMethods: TNxStringArray;
+  i: Integer;
+begin
+  lMethods := PublishedMethodNames(aTestClass);
+  for i := 0 to High(lMethods) do
+    fIgnoredTests.Add(aTestClass.ClassFullTestName(aTestClass, lMethods[i]));
+end;
+
+function TNxTestRegistry.IsTestIgnored(const aTestName: string): Boolean;
+var
+  Idx: Integer;
+begin
+  Result := fIgnoredTests.Find(aTestName, Idx);
+end;
+
 // ***** NxTestRegistry *****
 
 class procedure NxTestRegistry.RegisterTests(const aTestClass: TNxTestCaseClass);
@@ -1578,6 +1686,21 @@ end;
 class procedure NxTestRegistry.RegisterTests(const aSuite: INxTestSuite);
 begin
   fNxTestRegistry.RegisterTests(aSuite);
+end;
+
+class procedure NxTestRegistry.IgnoreTest(const aTestClass: TNxTestCaseClass; aMethod: Pointer);
+begin
+  fNxTestRegistry.IgnoreTest(aTestClass, aMethod);
+end;
+
+class procedure NxTestRegistry.IgnoreTests(const aTestClass: TNxTestCaseClass);
+begin
+  fNxTestRegistry.IgnoreTests(aTestClass);
+end;
+
+class function NxTestRegistry.IsTestIgnored(const aTestName: string): Boolean;
+begin
+  Result := fNxTestRegistry.IsTestIgnored(aTestName);
 end;
 
 class procedure NxTestRegistry.Discover;
