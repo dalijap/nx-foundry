@@ -630,6 +630,7 @@ begin
     .Write('====================================================')
 
     .Indent
+    .Write(Format('Suite:      %s', [aSummary.Info.TestName]))
     .Write(Format('Outcome:    %s', [NxTestOutcomeText[aSummary.Outcome]]))
     .Write(OutcomeMsg)
     .Outdent
