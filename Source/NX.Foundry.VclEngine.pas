@@ -556,7 +556,7 @@ end;
 
 function TNxTestApp.TestChecked(const aTest: INxTest): Boolean;
 begin
-  Result := not ContainsString(aTest.FullTestName, fDisabledTests);
+  Result := not ContainsString(fDisabledTests, aTest.FullTestName);
 end;
 
 function TNxTestApp.TestSelected(const aTest: INxTest): Boolean;
@@ -564,7 +564,7 @@ begin
   // if selected tests array is empty, treat all tests as selected
   Result := Length(fSelectedTests) = 0;
   if not Result then
-    Result := ContainsString(aTest.FullTestName, fSelectedTests);
+    Result := ContainsString(fSelectedTests, aTest.FullTestName);
 end;
 
 procedure TNxTestApp.UpdateTestSelection;
@@ -573,7 +573,7 @@ procedure SelectRecursive(aNode: TNxTreeNode);
 var
   lNode: TNxTreeNode;
 begin
-  AddUniqueString(aNode.TagString, fSelectedTests);
+  AddUniqueString(fSelectedTests, aNode.TagString);
   lNode := aNode.GetFirstChild as TNxTreeNode;
   while Assigned(lNode) do
     begin
@@ -595,7 +595,7 @@ begin
       lNode.ImageIndex := Ord(TestSkip);
       lNode.SelectedIndex := Ord(TestSkip);
       if not TreeViewNodeIsChecked(lNode) then
-        AddUniqueString(lNode.TagString, fDisabledTests);
+        AddUniqueString(fDisabledTests, lNode.TagString);
     end;
   if Length(fDisabledTests) > 0 then
     begin

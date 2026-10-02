@@ -504,9 +504,12 @@ type
 
 // standalone helper functions
 function FormatDuration(aDuration: UInt32): string;
-procedure AddUniqueString(const aValue: string; var aStrings: TNxStringArray);
-procedure RemoveString(const aValue: string; var aStrings: TNxStringArray);
-function ContainsString(const aValue: string; aStrings: TNxStringArray): Boolean;
+procedure AddString(var aStrings: TNxStringArray; const aValue: string);
+procedure AddStrings(var aStrings: TNxStringArray; const aValues: array of string);
+procedure AddUniqueString(var aStrings: TNxStringArray; const aValue: string);
+procedure AddUniqueStrings(var aStrings: TNxStringArray; const aValues: array of string);
+procedure RemoveString(var aStrings: TNxStringArray; const aValue: string);
+function ContainsString(aStrings: TNxStringArray; const aValue: string): Boolean;
 function SaveStringToFile(const aFileName, aValue: string): Boolean;
 
 
@@ -1731,16 +1734,40 @@ begin
   Result := StringReplace(Result, ' ', '0', [rfReplaceAll]);
 end;
 
-procedure AddUniqueString(const aValue: string; var aStrings: TNxStringArray);
+procedure AddString(var aStrings: TNxStringArray; const aValue: string);
 begin
-  if not ContainsString(aValue, aStrings) then
+  SetLength(aStrings, Length(aStrings) + 1);
+  aStrings[High(aStrings)] := aValue;
+end;
+
+procedure AddStrings(var aStrings: TNxStringArray; const aValues: array of string);
+var
+  i, n: Integer;
+begin
+  n := Length(aStrings);
+  SetLength(aStrings, n + Length(aValues));
+  for i := 0 to High(aValues) do
+    aStrings[n + i] := aValues[i];
+end;
+
+procedure AddUniqueString(var aStrings: TNxStringArray; const aValue: string);
+begin
+  if not ContainsString(aStrings, aValue) then
     begin
       SetLength(aStrings, Length(aStrings) + 1);
       aStrings[High(aStrings)] := aValue;
     end;
 end;
 
-procedure RemoveString(const aValue: string; var aStrings: TNxStringArray);
+procedure AddUniqueStrings(var aStrings: TNxStringArray; const aValues: array of string);
+var
+  i: Integer;
+begin
+  for i := 0 to High(aValues) do
+    AddUniqueString(aStrings, aValues[i]);
+end;
+
+procedure RemoveString(var aStrings: TNxStringArray; const aValue: string);
 var
   i: Integer;
 begin
@@ -1754,7 +1781,7 @@ begin
       end;
 end;
 
-function ContainsString(const aValue: string; aStrings: TNxStringArray): Boolean;
+function ContainsString(aStrings: TNxStringArray; const aValue: string): Boolean;
 var
   i: Integer;
 begin

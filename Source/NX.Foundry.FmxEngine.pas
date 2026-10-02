@@ -488,7 +488,7 @@ end;
 
 function TNxTestApp.TestChecked(const aTest: INxTest): Boolean;
 begin
-  Result := not ContainsString(aTest.FullTestName, fDisabledTests);
+  Result := not ContainsString(fDisabledTests, aTest.FullTestName);
 end;
 
 function TNxTestApp.TestSelected(const aTest: INxTest): Boolean;
@@ -496,7 +496,7 @@ begin
   // if selected tests array is empty, treat all tests as selected
   Result := Length(fSelectedTests) = 0;
   if not Result then
-    Result := ContainsString(aTest.FullTestName, fSelectedTests);
+    Result := ContainsString(fSelectedTests, aTest.FullTestName);
 end;
 
 procedure TNxTestApp.UpdateTestSelection;
@@ -505,7 +505,7 @@ procedure SelectRecursive(aNode: TTreeViewItem);
 var
   i: Integer;
 begin
-  AddUniqueString(aNode.TagString, fSelectedTests);
+  AddUniqueString(fSelectedTests, aNode.TagString);
   for i := 0 to aNode.Count - 1 do
     if aNode.Items[i].IsChecked then
       SelectRecursive(aNode.Items[i]);
@@ -522,7 +522,7 @@ begin
       lNode := fTreeView.ItemByGlobalIndex(i);
       TTestTreeItem(lNode).Status := TestSkip;
       if not lNode.IsChecked then
-        AddUniqueString(lNode.TagString, fDisabledTests);
+        AddUniqueString(fDisabledTests, lNode.TagString);
     end;
   if Length(fDisabledTests) > 0 then
     begin
