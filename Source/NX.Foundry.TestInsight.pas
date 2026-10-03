@@ -1,8 +1,8 @@
-(*******************************************************************************
+{*******************************************************************************
 
   MIT License
 
-  Copyright (c) 2012-2026 Dalija Prasnikar 
+  Copyright (c) 2012-2026 Dalija Prasnikar
 
   https://dalija.prasnikar.info
 
@@ -24,7 +24,7 @@
   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
   SOFTWARE.
 
-********************************************************************************)
+********************************************************************************}
 
 unit NX.Foundry.TestInsight;
 
