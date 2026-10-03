@@ -34,6 +34,9 @@ interface
 
 uses
   {$IFDEF NAMESPACES}
+  {$IFDEF GENERICS}
+  System.Generics.Collections,
+  {$ENDIF}
   System.SysUtils,
   System.Classes,
   System.Contnrs,
@@ -100,11 +103,40 @@ type
     TestIncomplete
     );
 
+  TNxTestDescriptor = class
+  private
+    fTestName: string;
+    fCategories: TNxStringArray;
+  public
+    constructor Create(const aTestName: string);
+    procedure AddCategory(const aCategory: string);
+    procedure AddCategories(const aCategories: array of string);
+    property TestName: string read fTestName;
+    property Categories: TNxStringArray read fCategories;
+  end;
+
+  TNxTestDescriptorList = class
+  private
+    {$IFDEF GENERICS}
+    fItems: TDictionary<string, TNxTestDescriptor>;
+    {$ELSE}
+    fItems: TStringList;
+    {$ENDIF}
+  public
+    constructor Create;
+    destructor Destroy; override;
+    function AddTest(const aTestName: string): TNxTestDescriptor;
+    function FindTest(const aTestName: string): TNxTestDescriptor;
+  end;
+
   INxTestInfo = interface;
   INxTest = interface;
   INxTestResult = interface;
 
-  TNxTestFilter = function(const aTest: INxTest): Boolean of object;
+  INxTestFilter = interface
+    ['{FE3D8871-D238-4D22-9CD5-915EB628595F}']
+    function Matches(const aTest: INxTest): Boolean;
+  end;
 
   INxTestResult = interface
     ['{FD39D82E-AAE9-4B30-BFCF-36546E9CFE5F}']
@@ -153,6 +185,7 @@ type
 
   INxTestInfo = interface
     ['{872557E6-9BEF-4A3E-B66E-6109475613CC}']
+    function GetCategories: TNxStringArray;
     function GetTestPath: string;
     function GetTestUnitName: string;
     function GetTestClassName: string;
@@ -160,6 +193,7 @@ type
     function GetTestName: string;
     function GetFullTestName: string;
     function GetTestClass: TClass;
+    property Categories: TNxStringArray read GetCategories;
     property TestPath: string read GetTestPath;
     property TestUnitName: string read GetTestUnitName;
     property TestClassName: string read GetTestClassName;
@@ -171,6 +205,7 @@ type
 
   INxTest = interface(INxTestInfo)
     ['{BE84487C-2D2A-4531-A66A-9A7EE1FF0E67}']
+    procedure ApplyDescriptor(aDescriptor: TNxTestDescriptor);
     procedure Run;
   end;
 
@@ -178,7 +213,7 @@ type
     ['{B2A70242-6BEB-4C76-B18F-BF5589780DA2}']
     procedure AddTest(const aTest: INxTest);
     procedure AddSuite(const aSuite: INxTestSuite);
-    procedure Discover;
+    procedure Discover(aDescriptor: TNxTestDescriptorList);
     function Test(aIndex: Integer): INxTest;
     function ItemCount: Integer;
     function TotalCount: Integer;
@@ -206,7 +241,7 @@ type
     ['{87C56F9F-9031-45AF-A300-9CEF48475B98}']
     function GetDiscoveryMode: Boolean;
     procedure SetDiscoveryMode(aValue: Boolean);
-    procedure RunTests(aFilter: TNxTestFilter = nil);
+    procedure RunTests(const aFilter: INxTestFilter = nil);
     procedure Cancel;
     property DiscoveryMode: Boolean read GetDiscoveryMode write SetDiscoveryMode;
   end;
@@ -240,6 +275,14 @@ type
     constructor Create;
     procedure Clear;
     property Count: Integer read GetCount;
+  end;
+
+  TNxTestFilterList = class(TNxList)
+  private
+    function GetItem(Index: Integer): INxTestFilter;
+  public
+    procedure Add(const aItem: INxTestFilter);
+    property Items[Index: Integer]: INxTestFilter read GetItem; default;
   end;
 
   TNxTestResultList = class(TNxList)
@@ -334,9 +377,11 @@ type
   TNxBaseTest = class(TInterfacedObject, INxTest)
   protected
     AutoPool: INxAutoReleasePool;
+    fCategories: TNxStringArray;
     fTestMethodName: string;
     fTestName: string;
 
+    function GetCategories: TNxStringArray;
     function GetTestPath: string; virtual;
     function GetTestUnitName: string;
     function GetTestClassName: string;
@@ -351,7 +396,9 @@ type
   public
     procedure AfterConstruction; override;
     procedure BeforeDestruction; override;
+    procedure ApplyDescriptor(aDescriptor: TNxTestDescriptor);
     procedure Run;
+    property Categories: TNxStringArray read GetCategories;
     property TestPath: string read GetTestPath;
     property TestUnitName: string read GetTestUnitName;
     property TestClassName: string read GetTestClassName;
@@ -387,7 +434,7 @@ type
     destructor Destroy; override;
     procedure AddTest(const aTest: INxTest);
     procedure AddSuite(const aSuite: INxTestSuite);
-    procedure Discover; virtual;
+    procedure Discover(aDescriptor: TNxTestDescriptorList); virtual;
     function Test(aIndex: Integer): INxTest;
     function ItemCount: Integer;
     function TotalCount: Integer;
@@ -400,14 +447,14 @@ type
     function GetTestPath: string; override;
   public
     constructor Create(const aClass: TNxTestCaseClass);
-    procedure Discover; override;
+    procedure Discover(aDescriptor: TNxTestDescriptorList); override;
   end;
 
 
   TNxTestRunner = class(TInterfacedObject, INxTestRunner)
   protected
     fEngine: Pointer;
-    fFilter: TNxTestFilter;
+    fFilter: INxTestFilter;
     fDiscoveryMode: Boolean;
     {$IFDEF ATTRIBUTES}[volatile]{$ENDIF}
     fCanceled: Boolean;
@@ -423,7 +470,7 @@ type
     constructor Create(const aEngine: INxTestEngine); virtual;
 
     function ShouldRunTest(const aTest: INxTest): Boolean; virtual;
-    procedure RunTests(aFilter: TNxTestFilter = nil);
+    procedure RunTests(const aFilter: INxTestFilter = nil);
     procedure Cancel;
 
     procedure NotifyRunStart(const aTest: INxTest; aTotalCount: Integer);
@@ -474,6 +521,7 @@ type
   TNxTestRegistry = class
   protected
     fSuite: INxTestSuite;
+    fConfigList: TNxTestDescriptorList;
     fIgnoredTests: TStringList;
   public
     constructor Create;
@@ -481,11 +529,18 @@ type
     procedure RegisterTests(const aTestClass: TNxTestCaseClass); overload;
     procedure RegisterTests(const aTest: INxTest); overload;
     procedure RegisterTests(const aSuite: INxTestSuite); overload;
+    procedure CategorizeTest(const aTestClass: TNxTestCaseClass; const aMethodName, aCategory: string); overload;
+    procedure CategorizeTest(const aTestClass: TNxTestCaseClass; const aMethodName: string; const aCategories: array of string); overload;
+    procedure CategorizeTest(const aTestClass: TNxTestCaseClass; aMethod: Pointer; const aCategory: string); overload;
+    procedure CategorizeTest(const aTestClass: TNxTestCaseClass; aMethod: Pointer; const aCategories: array of string); overload;
+    procedure CategorizeTests(const aTestClass: TNxTestCaseClass; const aCategory: string); overload;
+    procedure CategorizeTests(const aTestClass: TNxTestCaseClass; const aCategories: array of string); overload;
     procedure IgnoreTest(const aTestClass: TNxTestCaseClass; aMethod: Pointer);
     procedure IgnoreTests(const aTestClass: TNxTestCaseClass);
     function IsTestIgnored(const aTestName: string): Boolean;
     procedure Discover;
     property Suite: INxTestSuite read fSuite;
+    property ConfigList: TNxTestDescriptorList read fConfigList;
   end;
 
   NxTestRegistry = class
@@ -493,6 +548,10 @@ type
     class procedure RegisterTests(const aTestClass: TNxTestCaseClass); overload; {$IFDEF STATIC} static; {$ENDIF}
     class procedure RegisterTests(const aTest: INxTest); overload; {$IFDEF STATIC} static; {$ENDIF}
     class procedure RegisterTests(const aSuite: INxTestSuite); overload; {$IFDEF STATIC} static; {$ENDIF}
+    class procedure CategorizeTest(const aTestClass: TNxTestCaseClass; aMethod: Pointer; const aCategory: string); overload; {$IFDEF STATIC} static; {$ENDIF}
+    class procedure CategorizeTest(const aTestClass: TNxTestCaseClass; aMethod: Pointer; const aCategories: array of string); overload; {$IFDEF STATIC} static; {$ENDIF}
+    class procedure CategorizeTests(const aTestClass: TNxTestCaseClass; const aCategory: string); overload; {$IFDEF STATIC} static; {$ENDIF}
+    class procedure CategorizeTests(const aTestClass: TNxTestCaseClass; const aCategories: array of string); overload; {$IFDEF STATIC} static; {$ENDIF}
     // Ignores single published test method from a test class
     class procedure IgnoreTest(const aTestClass: TNxTestCaseClass; aMethod: Pointer); {$IFDEF STATIC} static; {$ENDIF}
     // Ignores all published test methods from a test class
@@ -500,6 +559,7 @@ type
     class function IsTestIgnored(const aTestName: string): Boolean; {$IFDEF STATIC} static; {$ENDIF}
     class procedure Discover; {$IFDEF STATIC} static; {$ENDIF}
     class function Suite: INxTestSuite; {$IFDEF STATIC} static; {$ENDIF}
+    class function ConfigList: TNxTestDescriptorList; {$IFDEF STATIC} static; {$ENDIF}
   end;
 
 // standalone helper functions
@@ -517,6 +577,7 @@ const
   NxExitFail = 1;
   NxTestOutcomeLetter: array[TNxTestOutcome] of string = ('-', '.', '?', 'I', 'L', 'F', 'E', 'T', 'A');
   NxTestOutcomeText: array[TNxTestOutcome] of string = ('SKIP', 'PASS', 'EMPTY', 'IGNORE', 'LEAK', 'FAIL', 'ERROR', 'TIMEOUT', 'ABORT');
+  NxTestOutcomeDescription: array[TNxTestOutcome] of string = ('Skipped', 'Passed', 'Empty', 'Ignored', 'Leaked', 'Failed', 'Errored', 'Timeout', 'Aborted');
 
 // global engine reference, should be initialized only once at application startup
 var
@@ -567,6 +628,88 @@ end;
 
 {$IFDEF REGION}
 {$ENDREGION '***** Compatibility *****'}
+{$ENDIF}
+
+{$IFDEF REGION}
+{$REGION '***** Configuration *****'}
+{$ENDIF}
+
+// ***** TNxTestDescriptor *****
+
+constructor TNxTestDescriptor.Create(const aTestName: string);
+begin
+  fTestName := aTestName;
+end;
+
+procedure TNxTestDescriptor.AddCategory(const aCategory: string);
+begin
+  // skip verifying whether category is unique for speed
+  // categories are used only as a flag and duplicates don't have impact on functionality
+  AddString(fCategories, aCategory);
+end;
+
+procedure TNxTestDescriptor.AddCategories(const aCategories: array of string);
+begin
+  // skip verifying whether category is unique for speed
+  // categories are used only as a flag and duplicates don't have impact on functionality
+  AddStrings(fCategories, aCategories);
+end;
+
+// ***** TNxTestDescriptorList *****
+
+constructor TNxTestDescriptorList.Create;
+begin
+  {$IFDEF GENERICS}
+  fItems := TObjectDictionary<string, TNxTestDescriptor>.Create([doOwnsValues]);
+  {$ELSE}
+  fItems := TStringList.Create;
+  fItems.Sorted := True;
+  {$ENDIF}
+end;
+
+destructor TNxTestDescriptorList.Destroy;
+{$IFDEF GENERICS}
+begin
+{$ELSE}
+var
+  i: Integer;
+begin
+  for i := fItems.Count - 1 downto 0 do
+    fItems.Objects[i].Free;
+{$ENDIF}
+  fItems.Free;
+  inherited;
+end;
+
+function TNxTestDescriptorList.AddTest(const aTestName: string): TNxTestDescriptor;
+begin
+  Result := TNxTestDescriptor.Create(aTestName);
+  {$IFDEF GENERICS}
+  fItems.Add(aTestName, Result);
+  {$ELSE}
+  fItems.AddObject(aTestName, Result);
+  {$ENDIF}
+end;
+
+function TNxTestDescriptorList.FindTest(const aTestName: string): TNxTestDescriptor;
+{$IFDEF GENERICS}
+begin
+  if not fItems.TryGetValue(aTestName, Result) then
+    Result := nil;
+end;
+{$ELSE}
+var
+  Idx: Integer;
+begin
+  if fItems.Find(aTestName, Idx) then
+    Result := TNxTestDescriptor(fItems.Objects[Idx])
+  else
+    Result := nil;
+end;
+{$ENDIF}
+
+{$IFDEF REGION}
+{$ENDREGION '***** Configuration *****'}
 {$ENDIF}
 
 {$IFDEF REGION}
@@ -757,10 +900,6 @@ begin
 end;
 
 {$IFDEF REGION}
-{$ENDREGION '***** Results *****'}
-{$ENDIF}
-
-{$IFDEF REGION}
 {$REGION '***** Lists *****'}
 {$ENDIF}
 
@@ -780,6 +919,18 @@ end;
 function TNxList.GetCount: Integer;
 begin
   Result := fItems.Count;
+end;
+
+// ***** TNxTestFilterList *****
+
+procedure TNxTestFilterList.Add(const aItem: INxTestFilter);
+begin
+  fItems.Add(aItem);
+end;
+
+function TNxTestFilterList.GetItem(Index: Integer): INxTestFilter;
+begin
+  Result := fItems[Index] as INxTestFilter;
 end;
 
 // ***** TNxTestResultList *****
@@ -958,6 +1109,11 @@ procedure TNxBaseTest.Execute;
 begin
 end;
 
+function TNxBaseTest.GetCategories: TNxStringArray;
+begin
+  Result := fCategories;
+end;
+
 function TNxBaseTest.GetTestPath: string;
 begin
   if GetTestUnitName <> '' then
@@ -998,6 +1154,11 @@ end;
 function TNxBaseTest.GetTestClass: TClass;
 begin
   Result := ClassType;
+end;
+
+procedure TNxBaseTest.ApplyDescriptor(aDescriptor: TNxTestDescriptor);
+begin
+  AddStrings(fCategories, aDescriptor.Categories);
 end;
 
 procedure TNxBaseTest.Run;
@@ -1102,7 +1263,7 @@ begin
   fTests.Add(aSuite);
 end;
 
-procedure TNxTestSuite.Discover;
+procedure TNxTestSuite.Discover(aDescriptor: TNxTestDescriptorList);
 var
   lSuite: INxTestSuite;
   lTest: INxTest;
@@ -1112,7 +1273,7 @@ begin
     begin
       lTest := fTests[i];
       if Supports(lTest, INxTestSuite, lSuite) then
-        lSuite.Discover;
+        lSuite.Discover(aDescriptor);
     end;
 end;
 
@@ -1151,12 +1312,13 @@ begin
   fClass := aClass;
 end;
 
-procedure TNxTestCaseSuite.Discover;
+procedure TNxTestCaseSuite.Discover(aDescriptor: TNxTestDescriptorList);
 var
   lMethods: TNxStringArray;
   lCodePtr: Pointer;
   lTest: INxTest;
   i: Integer;
+  lDescriptor: TNxTestDescriptor;
 begin
   if fDiscovered then
     Exit;
@@ -1166,6 +1328,9 @@ begin
       lCodePtr := fClass.MethodAddress(lMethods[i]);
       lTest := fClass.Create(lMethods[i], lCodePtr);
       AddTest(lTest);
+      lDescriptor := aDescriptor.FindTest(lTest.FullTestName);
+      if Assigned(lDescriptor) then
+        lTest.ApplyDescriptor(lDescriptor);
     end;
   fDiscovered := True;
 end;
@@ -1213,7 +1378,7 @@ end;
 function TNxTestRunner.ShouldRunTest(const aTest: INxTest): Boolean;
 begin
   if Assigned(fFilter) then
-    Result := fFilter(aTest)
+    Result := fFilter.Matches(aTest)
   else
     Result := True;
 end;
@@ -1329,11 +1494,15 @@ begin
             // discovery mode is the same as skipping
             InternalSkipTest(lTest, TestSkip, aSummary)
           else
-          if NxTestRegistry.IsTestIgnored(lTest.FullTestName) then
-            InternalSkipTest(lTest, TestIgnore, aSummary)
-          else
           if ShouldRunTest(lTest) then
-            InternalRunTest(lTest, aSummary)
+            begin
+              // test for ignored only after test passes other filters
+              // otherwise test results will be polluted with ignored tests
+              if NxTestRegistry.IsTestIgnored(lTest.FullTestName) then
+                InternalSkipTest(lTest, TestIgnore, aSummary)
+              else
+                InternalRunTest(lTest, aSummary)
+            end
           else
             InternalSkipTest(lTest, TestSkip, aSummary)
         end;
@@ -1341,14 +1510,14 @@ begin
   NotifySuiteEnds(aSuite, aSummary);
 end;
 
-procedure TNxTestRunner.RunTests(aFilter: TNxTestFilter = nil);
+procedure TNxTestRunner.RunTests(const aFilter: INxTestFilter = nil);
 var
   lSummary: INxTestSummary;
   lSuite: INxTestSuite;
 begin
   fFilter := aFilter;
   lSuite := fNxTestRegistry.Suite;
-  lSuite.Discover;
+  lSuite.Discover(fNxTestRegistry.ConfigList);
   lSummary := TNxTestSummary.Create(lSuite, lSuite.TotalCount);
   NotifyRunStart(lSuite, lSuite.TotalCount);
   try
@@ -1621,6 +1790,7 @@ constructor TNxTestRegistry.Create;
 begin
   inherited;
   fSuite := TNxTestSuite.Create(ExtractFileName(ParamStr(0)));
+  fConfigList := TNxTestDescriptorList.Create;
   fIgnoredTests := TStringList.Create;
   fIgnoredTests.Sorted := True;
   fIgnoredTests.Duplicates := dupIgnore;
@@ -1628,6 +1798,7 @@ end;
 
 destructor TNxTestRegistry.Destroy;
 begin
+  fConfigList.Free;
   fIgnoredTests.Free;
   inherited;
 end;
@@ -1649,7 +1820,75 @@ end;
 
 procedure TNxTestRegistry.Discover;
 begin
-  fSuite.Discover;
+  fSuite.Discover(fConfigList);
+end;
+
+procedure TNxTestRegistry.CategorizeTest(const aTestClass: TNxTestCaseClass; const aMethodName, aCategory: string);
+var
+  lConfig: TNxTestDescriptor;
+  lTestName: string;
+begin
+  lTestName := aTestClass.ClassFullTestName(aTestClass, aMethodName);
+  lConfig := fConfigList.FindTest(lTestName);
+  if lConfig = nil then
+    lConfig := fConfigList.AddTest(lTestName);
+  lConfig.AddCategory(aCategory);
+end;
+
+procedure TNxTestRegistry.CategorizeTest(const aTestClass: TNxTestCaseClass; const aMethodName: string; const aCategories: array of string);
+var
+  lConfig: TNxTestDescriptor;
+  lTestName: string;
+begin
+  lTestName := aTestClass.ClassFullTestName(aTestClass, aMethodName);
+  lConfig := fConfigList.FindTest(lTestName);
+  if lConfig = nil then
+    lConfig := fConfigList.AddTest(lTestName);
+  lConfig.AddCategories(aCategories);
+end;
+
+procedure TNxTestRegistry.CategorizeTest(const aTestClass: TNxTestCaseClass; aMethod: Pointer; const aCategory: string);
+var
+  lConfig: TNxTestDescriptor;
+  lTestName: string;
+begin
+  lTestName := aTestClass.ClassFullTestName(aTestClass, aMethod);
+  lConfig := fConfigList.FindTest(lTestName);
+  if lConfig = nil then
+    lConfig := fConfigList.AddTest(lTestName);
+  lConfig.AddCategory(aCategory);
+end;
+
+procedure TNxTestRegistry.CategorizeTest(const aTestClass: TNxTestCaseClass; aMethod: Pointer; const aCategories: array of string);
+var
+  lConfig: TNxTestDescriptor;
+  lTestName: string;
+begin
+  lTestName := aTestClass.ClassFullTestName(aTestClass, aMethod);
+  lConfig := fConfigList.FindTest(lTestName);
+  if lConfig = nil then
+    lConfig := fConfigList.AddTest(lTestName);
+  lConfig.AddCategories(aCategories);
+end;
+
+procedure TNxTestRegistry.CategorizeTests(const aTestClass: TNxTestCaseClass; const aCategory: string);
+var
+  lMethods: TNxStringArray;
+  i: Integer;
+begin
+  lMethods := PublishedMethodNames(aTestClass);
+  for i := 0 to High(lMethods) do
+    CategorizeTest(aTestClass, lMethods[i], aCategory);
+end;
+
+procedure TNxTestRegistry.CategorizeTests(const aTestClass: TNxTestCaseClass; const aCategories: array of string);
+var
+  lMethods: TNxStringArray;
+  i: Integer;
+begin
+  lMethods := PublishedMethodNames(aTestClass);
+  for i := 0 to High(lMethods) do
+    CategorizeTest(aTestClass, lMethods[i], aCategories);
 end;
 
 procedure TNxTestRegistry.IgnoreTest(const aTestClass: TNxTestCaseClass; aMethod: Pointer);
@@ -1691,6 +1930,26 @@ begin
   fNxTestRegistry.RegisterTests(aSuite);
 end;
 
+class procedure NxTestRegistry.CategorizeTest(const aTestClass: TNxTestCaseClass; aMethod: Pointer; const aCategory: string);
+begin
+  fNxTestRegistry.CategorizeTest(aTestClass, aMethod, aCategory);
+end;
+
+class procedure NxTestRegistry.CategorizeTest(const aTestClass: TNxTestCaseClass; aMethod: Pointer; const aCategories: array of string);
+begin
+  fNxTestRegistry.CategorizeTest(aTestClass, aMethod, aCategories);
+end;
+
+class procedure NxTestRegistry.CategorizeTests(const aTestClass: TNxTestCaseClass; const aCategory: string);
+begin
+  fNxTestRegistry.CategorizeTests(aTestClass, aCategory);
+end;
+
+class procedure NxTestRegistry.CategorizeTests(const aTestClass: TNxTestCaseClass; const aCategories: array of string);
+begin
+  fNxTestRegistry.CategorizeTests(aTestClass, aCategories);
+end;
+
 class procedure NxTestRegistry.IgnoreTest(const aTestClass: TNxTestCaseClass; aMethod: Pointer);
 begin
   fNxTestRegistry.IgnoreTest(aTestClass, aMethod);
@@ -1714,6 +1973,11 @@ end;
 class function NxTestRegistry.Suite: INxTestSuite;
 begin
   Result := fNxTestRegistry.Suite;
+end;
+
+class function NxTestRegistry.ConfigList: TNxTestDescriptorList;
+begin
+  Result := fNxTestRegistry.ConfigList;
 end;
 
 {$IFDEF REGION}

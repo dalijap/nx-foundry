@@ -24,6 +24,7 @@ type
     procedure TestNone;
     procedure TestFail;
     procedure TestError;
+    procedure TestIgnored;
   end;
 
   TestBar = class(TNxTestCase)
@@ -35,6 +36,12 @@ type
   published
     procedure TestSut;
     procedure TestPool;
+  end;
+
+  TestIgnored = class(TNxTestCase)
+  published
+    procedure TestIgnoredFirst;
+    procedure TestIgnoredSecond;
   end;
 
 implementation
@@ -62,6 +69,11 @@ var
 begin
   ReturnValue := 'foo';
   Expect(ReturnValue).EqualTo('abc');
+end;
+
+procedure TestFoo.TestIgnored;
+begin
+  raise EUnexpected.Create('Ignored test');
 end;
 
 procedure TestFoo.TestError;
@@ -97,10 +109,29 @@ begin
   Expect(Bar).IsNot.Null;
 end;
 
+{ TestIgnored }
+
+procedure TestIgnored.TestIgnoredFirst;
+begin
+  raise EUnexpected.Create('Ignored test');
+end;
+
+procedure TestIgnored.TestIgnoredSecond;
+begin
+  raise EUnexpected.Create('Ignored test');
+end;
+
 initialization
 
   NxTestRegistry.RegisterTests(TestFoo);
+  NxTestRegistry.IgnoreTest(TestFoo, @TestFoo.TestIgnored);
+  NxTestRegistry.CategorizeTest(TestFoo, @TestFoo.TestIgnored, 'Ignored');
+  NxTestRegistry.CategorizeTest(TestFoo, @TestFoo.TestSuccess, 'Smoke');
+  NxTestRegistry.CategorizeTest(TestFoo, @TestFoo.TestFail, 'Long');
+  NxTestRegistry.CategorizeTest(TestFoo, @TestFoo.TestNone, 'Empty');
   NxTestRegistry.RegisterTests(TestBar);
+  NxTestRegistry.RegisterTests(TestIgnored);
+  NxTestRegistry.IgnoreTests(TestIgnored);
 
 end.
 

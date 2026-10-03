@@ -41,6 +41,7 @@ uses
   System.Generics.Collections,
   System.Threading,
   System.IOUtils,
+  System.Actions,
   FMX.Types,
   FMX.Objects,
   FMX.Graphics,
@@ -51,8 +52,12 @@ uses
   FMX.TreeView,
   FMX.Layouts,
   FMX.Controls.Presentation,
+  FMX.ActnList,
+  FMX.MultiView,
+  FMX.ListBox,
   NX.Foundry.TestFramework,
-  NX.Foundry.Config;
+  NX.Foundry.Config,
+  NX.Foundry.Filters;
 
 type
   TNxGuiTestEngine = class(TNxTestEngine)
@@ -93,19 +98,29 @@ type
   protected
     fConfig: TNxTestConfig;
     fForm: TMainForm;
+    fActionList: TActionList;
     fToolBar: TLayout;
+    fSelectionToolBar: TLayout;
     fTreeView: TTreeView;
     fStatusBar: TStatusBar;
     fRunBtn: TButton;
     fRunSelectedBtn: TButton;
     fCancelRunBtn: TButton;
+    fFilterLabel: TLabel;
     fStatusLabel: TLabel;
     fScoreLabel: TLabel;
+    fTotalLabel: TLabel;
+    fOutcomeLabels: array[TNxTestOutcome] of TLabel;
     fScoreProgress: TProgressBar;
     fProgress: TProgressBar;
+    fSideView: TMultiView;
+    fSideViewContent: TVertScrollBox;
+    fCategoriesLayout: TLayout;
+    fCategoriesFilterMode: TComboBox;
     fTestNodes: TDictionary<string, TTestTreeItem>;
     fDisabledTests: TNxStringArray;
     fSelectedTests: TNxStringArray;
+    fCategories: TNxStringArray;
     [volatile] fFormInitialized: Boolean;
     [volatile] fRunning: Boolean;
     procedure OnIdle(Sender: TObject; var Done: Boolean);
@@ -113,12 +128,23 @@ type
     procedure OnFormCloseQuery(Sender: TObject; var CanClose: Boolean);
 
     procedure BuildTreeRecursive(AParentNode: TControl; aSuite: INxTestSuite);
+    procedure BuildCategories;
+    procedure UpdateCategoriesLabel(Sender: TObject);
+
+    procedure ExecuteCollapseAll(Sender: TObject);
+    procedure ExecuteExpandAll(Sender: TObject);
+    procedure ExecuteSelectNode(Sender: TObject);
+    procedure ExecuteDeselectNode(Sender: TObject);
+    procedure ExecuteSelectAll(Sender: TObject);
+    procedure ExecuteDeselectAll(Sender: TObject);
+    procedure ExecuteSelectOutcome(Sender: TObject);
+
     procedure RunAll(Sender: TObject);
     procedure RunSelected(Sender: TObject);
     procedure CancelRun(Sender: TObject);
     function TestChecked(const aTest: INxTest): Boolean;
-    function TestSelected(const aTest: INxTest): Boolean;
     procedure UpdateTestSelection;
+    function CategoryFilter: INxTestStringsFilter;
     procedure SetRunning(const Value: Boolean);
     property Running: Boolean read fRunning write SetRunning;
   public
@@ -189,8 +215,11 @@ begin
         begin
           R.Inflate(0, -3);
           Path.AddEllipse(R);
+          Canvas.Stroke.Kind := TBrushKind.Solid;
+          Canvas.Stroke.Color := TAlphaColorRec.Gray;
           Canvas.Fill.Color := DrawColor;
           Canvas.FillPath(Path, 1);
+          Canvas.DrawPath(Path, 1);
         end;
 
       TestPass :
@@ -206,9 +235,9 @@ begin
           Canvas.Stroke.Join := TStrokeJoin.Round;
           Canvas.Stroke.Cap := TStrokeCap.Round;
           Path.Clear;
-          Path.MoveTo(TPointF.Create(5, 12));
-          Path.LineTo(TPointF.Create(9, 15));
-          Path.LineTo(TPointF.Create(13, 8));
+          Path.MoveTo(TPointF.Create(R.Left + 5, R.Top + 10));
+          Path.LineTo(TPointF.Create(R.Left + 9, R.Top + 13));
+          Path.LineTo(TPointF.Create(R.Left + 13, R.Top + 6));
           Canvas.DrawPath(Path, 1);
         end;
 
@@ -344,7 +373,16 @@ end;
 
 procedure TNxTestApp.CreateUserInterface;
 var
+  lAction: TAction;
   lLayout: TLayout;
+  lFlow: TFlowLayout;
+  lBtn: TButton;
+  lSpeedBtn: TSpeedButton;
+  lChk: TCheckBox;
+  lOutcome: TNxTestOutcome;
+  lStatus: TTestStatus;
+  lLabel: TLabel;
+  lPos: Single;
 begin
   fFormInitialized := True;
 
@@ -353,8 +391,10 @@ begin
 
   fForm.OnCloseQuery := OnFormCloseQuery;
 
+  fActionList := TActionList.Create(fForm);
+
   fToolBar := TLayout.Create(fForm);
-  fToolBar.Align := TAlignLayout.Top;
+  fToolBar.Align := TAlignLayout.MostTop;
   fToolBar.Height := 48;
   fToolBar.Parent := fForm;
   fToolBar.Padding.Left := 8;
@@ -362,7 +402,101 @@ begin
   fToolBar.Padding.Top := 6;
   fToolBar.Padding.Bottom := 6;
 
+  fSelectionToolBar := TLayout.Create(fForm);
+  fSelectionToolBar.Height := 42;
+
+  fSideView := TMultiView.Create(fForm);
+  fSideView.Width := 220;
+  fSideView.Parent := fForm;
+
+  if fForm.Width < 1000 then
+    begin
+      fSelectionToolBar.Align := TAlignLayout.Top;
+      fSelectionToolBar.Parent := fForm;
+      fSelectionToolBar.Padding.Bottom := 6;
+      fSideView.Mode := TMultiViewMode.Drawer;
+    end
+  else
+    begin
+      fSelectionToolBar.Align := TAlignLayout.Client;
+      fSelectionToolBar.Margins.Left := 6;
+      fSelectionToolBar.Parent := fToolBar;
+      fSideView.Mode := TMultiViewMode.Panel;
+    end;
+
+  lSpeedBtn := TSpeedButton.Create(fForm);
+  lSpeedBtn.Parent := fToolBar;
+  lSpeedBtn.StyleLookup := 'detailstoolbuttonbordered';
+  lSpeedBtn.Align := TAlignLayout.MostLeft;
+  lSpeedBtn.Width := 32;
+  fSideView.MasterButton := lSpeedBtn;
+
+  fSideViewContent := TVertScrollBox.Create(fForm);
+  fSideViewContent.Parent := fSideView;
+  fSideViewContent.Align := TAlignLayout.Client;
+
+  lAction := TAction.Create(fActionList);
+  lAction.Text := 'Collapse All';
+  lAction.OnExecute := ExecuteCollapseAll;
+
+  lBtn := TButton.Create(fForm);
+  lBtn.Height := 32;
+  lBtn.Position.Y := 800;
+  lBtn.Action := lAction;
+  lBtn.Margins.Left := 8;
+  lBtn.Margins.Right := 8;
+  lBtn.Margins.Top := 4;
+  lBtn.Margins.Bottom := 4;
+  lBtn.Parent := fSideViewContent;
+  lBtn.Align := TAlignLayout.Top;
+
+  lAction := TAction.Create(fActionList);
+  lAction.Text := 'Expand All';
+  lAction.OnExecute := ExecuteExpandAll;
+
+  lBtn := TButton.Create(fForm);
+  lBtn.Height := 32;
+  lBtn.Position.Y := 800;
+  lBtn.Action := lAction;
+  lBtn.Margins.Left := 8;
+  lBtn.Margins.Right := 8;
+  lBtn.Margins.Top := 4;
+  lBtn.Margins.Bottom := 4;
+  lBtn.Parent := fSideViewContent;
+  lBtn.Align := TAlignLayout.Top;
+
+  lAction := TAction.Create(fActionList);
+  lAction.Text := 'Select Node';
+  lAction.OnExecute := ExecuteSelectNode;
+
+  lBtn := TButton.Create(fForm);
+  lBtn.Height := 32;
+  lBtn.Position.Y := 800;
+  lBtn.Action := lAction;
+  lBtn.Margins.Left := 8;
+  lBtn.Margins.Right := 8;
+  lBtn.Margins.Top := 4;
+  lBtn.Margins.Bottom := 4;
+  lBtn.Parent := fSideViewContent;
+  lBtn.Align := TAlignLayout.Top;
+
+  lAction := TAction.Create(fActionList);
+  lAction.Text := 'Deselect Node';
+  lAction.OnExecute := ExecuteDeselectNode;
+
+  lBtn := TButton.Create(fForm);
+  lBtn.Height := 32;
+  lBtn.Position.Y := 800;
+  lBtn.Action := lAction;
+  lBtn.Margins.Left := 8;
+  lBtn.Margins.Right := 8;
+  lBtn.Margins.Top := 4;
+  lBtn.Margins.Bottom := 4;
+  lBtn.Parent := fSideViewContent;
+  lBtn.Align := TAlignLayout.Top;
+
   fRunBtn := TButton.Create(fForm);
+  fRunBtn.Margins.Left := 8;
   fRunBtn.Align := TAlignLayout.Left;
   fRunBtn.Text := 'Run All';
   fRunBtn.Parent := fToolBar;
@@ -371,7 +505,7 @@ begin
 
   fRunSelectedBtn := TButton.Create(fForm);
   fRunSelectedBtn.Margins.Left := 8;
-  fRunSelectedBtn.Position.X := 600;
+  fRunSelectedBtn.Position.X := 1000;
   fRunSelectedBtn.Align := TAlignLayout.Left;
   fRunSelectedBtn.Text := 'Run Selected';
   fRunSelectedBtn.Parent := fToolBar;
@@ -380,19 +514,165 @@ begin
 
   fCancelRunBtn := TButton.Create(fForm);
   fCancelRunBtn.Margins.Left := 8;
-  fCancelRunBtn.Position.X := 600;
+  fCancelRunBtn.Position.X := 1000;
   fCancelRunBtn.Align := TAlignLayout.Left;
   fCancelRunBtn.Text := 'Cancel';
   fCancelRunBtn.Parent := fToolBar;
-  fCancelRunBtn.Width := 120;
+  fCancelRunBtn.Width := 100;
   fCancelRunBtn.OnClick := CancelRun;
   fCancelRunBtn.Enabled := False;
+
+  lAction := TAction.Create(fActionList);
+  lAction.Hint := 'Select All';
+  lAction.OnExecute := ExecuteSelectAll;
+
+  lSpeedBtn := TSpeedButton.Create(fForm);
+  lSpeedBtn.Action := lAction;
+  lSpeedBtn.Width := 36;
+  lSpeedBtn.Position.X := 1000;
+  lSpeedBtn.Align := TAlignLayout.Left;
+  lSpeedBtn.Parent := fSelectionToolBar;
+
+  lChk := TCheckBox.Create(lSpeedBtn);
+  lChk.IsChecked := True;
+  lChk.HitTest := False;
+  lChk.Parent := lSpeedBtn;
+  lChk.Position.X := 8;
+  lChk.Position.Y := 8;
+
+  lAction := TAction.Create(fActionList);
+  lAction.Hint := 'Deselect All';
+  lAction.OnExecute := ExecuteDeselectAll;
+
+  lSpeedBtn := TSpeedButton.Create(fForm);
+  lSpeedBtn.Action := lAction;
+  lSpeedBtn.Width := 36;
+  lSpeedBtn.Margins.Left := 6;
+  lSpeedBtn.Position.X := 1000;
+  lSpeedBtn.Align := TAlignLayout.Left;
+  lSpeedBtn.Parent := fSelectionToolBar;
+
+  lChk := TCheckBox.Create(lSpeedBtn);
+  lChk.IsChecked := false;
+  lChk.HitTest := False;
+  lChk.Parent := lSpeedBtn;
+  lChk.Position.X := 8;
+  lChk.Position.Y := 8;
+
+  for lOutcome := Low(TNxTestOutcome) to Pred(High(TNxTestOutcome)) do
+    begin
+      lAction := TAction.Create(fActionList);
+      lAction.Hint := 'Select ' + NxTestOutcomeDescription[lOutcome];
+      lAction.OnExecute := ExecuteSelectOutcome;
+      lAction.Tag := Ord(lOutcome);
+
+      lSpeedBtn := TSpeedButton.Create(fForm);
+      lSpeedBtn.Margins.Left := 6;
+      lSpeedBtn.Height := 36;
+      lSpeedBtn.Width := 36;
+      lSpeedBtn.Action := lAction;
+      lSpeedBtn.Position.X := 800;
+      lSpeedBtn.Parent := fSelectionToolBar;
+      lSpeedBtn.Align := TAlignLayout.Left;
+
+      lStatus := TTestStatus.Create(lSpeedBtn);
+      lStatus.HitTest := False;
+      lStatus.Width := 18;
+      lStatus.Height := 24;
+      lStatus.Status := lOutcome;
+      lStatus.Parent := lSpeedBtn;
+      lStatus.Position.X := 4;
+      lStatus.Position.Y := 3;
+    end;
+
+  fFilterLabel := TLabel.Create(fForm);
+  fFilterLabel.Text := '';
+  fFilterLabel.Height := 24;
+  fFilterLabel.Margins.Left := 6;
+  fFilterLabel.Margins.Right := 6;
+  fFilterLabel.Align := TAlignLayout.Top;
+  fFilterLabel.Parent := fForm;
 
   fTreeView := TTreeView.Create(fForm);
   fTreeView.Align := TAlignLayout.Client;
   fTreeView.Parent := fForm;
   fTreeView.ShowCheckboxes := True;
   fTreeView.ShowScrollBars := True;
+
+  lFlow := TFlowLayout.Create(fForm);
+  lFlow.Height := 48;
+  lFlow.Margins.Top := 6;
+  lFlow.Margins.Left := 6;
+  lFlow.Margins.Right := 6;
+  lFlow.Align := TAlignLayout.Bottom;
+  lFlow.Parent := fForm;
+
+  lLayout := TLayout.Create(fForm);
+  lLayout.Width := 52;
+  lLayout.Height := 48;
+  lLayout.Parent := lFlow;
+
+  lLabel := TLabel.Create(fForm);
+  lLabel.AutoSize := False;
+  lLabel.Height := 24;
+  lLabel.StyledSettings := [TStyledSetting.Family, TStyledSetting.Style, TStyledSetting.FontColor];
+  lLabel.TextSettings.Font.Size := 12;
+  lLabel.Text := 'Tests';
+  lLabel.Trimming := TTextTrimming.None;
+  lLabel.VertTextAlign := TTextAlign.Center;
+  lLabel.Align := TAlignLayout.Top;
+  lLabel.Parent := lLayout;
+
+  fTotalLabel := TLabel.Create(fForm);
+  fTotalLabel.Text := '0';
+  fTotalLabel.TextAlign := TTextAlign.Center;
+  fTotalLabel.VertTextAlign := TTextAlign.Center;
+  fTotalLabel.Align := TAlignLayout.Top;
+  fTotalLabel.Parent := lLayout;
+
+  lPos := lLayout.Width;
+
+  for lOutcome := Low(TNxTestOutcome) to Pred(High(TNxTestOutcome)) do
+    begin
+      lPos := lPos + 68;
+      if lPos > fForm.Width then
+        begin
+          var lBreak := TFlowLayoutBreak.Create(fForm);
+          lBreak.Parent := lFlow;
+          lFlow.Height := lFlow.Height + 48;
+          lPos := 68;
+        end;
+      lLayout := TLayout.Create(fForm);
+      lLayout.Width := 68;
+      lLayout.Height := 48;
+      lLayout.Parent := lFlow;
+
+      lLabel := TLabel.Create(fForm);
+      lLabel.AutoSize := False;
+      lLabel.Height := 24;
+      lLabel.StyledSettings := [TStyledSetting.Family, TStyledSetting.Style, TStyledSetting.FontColor];
+      lLabel.TextSettings.Font.Size := 12;
+      lLabel.Text := NxTestOutcomeDescription[lOutcome];
+      lLabel.VertTextAlign := TTextAlign.Center;
+      lLabel.Trimming := TTextTrimming.None;
+      lLabel.Margins.Left := 22;
+      lLabel.Align := TAlignLayout.Top;
+      lLabel.Parent := lLayout;
+
+      lStatus := TTestStatus.Create(fForm);
+      lStatus.Width := 18;
+      lStatus.Height := 24;
+      lStatus.Status := lOutcome;
+      lStatus.Parent := lLayout;
+
+      lLabel := TLabel.Create(fForm);
+      lLabel.Text := '0';
+      lLabel.TextAlign := TTextAlign.Center;
+      lLabel.VertTextAlign := TTextAlign.Center;
+      lLabel.Align := TAlignLayout.Top;
+      lLabel.Parent := lLayout;
+      fOutcomeLabels[lOutcome] := lLabel;
+    end;
 
   lLayout := TLayout.Create(fForm);
   lLayout.Height := 20;
@@ -435,6 +715,7 @@ begin
     begin
       BuildTreeRecursive(fTreeView, NxTestRegistry.Suite);
       fTreeView.ExpandAll;
+      BuildCategories;
     end);
 end;
 
@@ -467,8 +748,72 @@ begin
         lNode.Parent := lSuiteNode;
         lNode.TagString := lTest.FullTestName;
         fTestNodes.TryAdd(lTest.FullTestName, lNode);
+        AddUniqueStrings(fCategories, lTest.Categories);
       end;
   end;
+end;
+
+procedure TNxTestApp.BuildCategories;
+var
+  lLabel: TLabel;
+  lChk: TCheckBox;
+  i: Integer;
+begin
+  lLabel := TLabel.Create(fForm);
+  lLabel.Margins.Left := 8;
+  lLabel.Margins.Top := 8;
+  lLabel.Text := 'Categories Filter';
+  lLabel.Align := TAlignLayout.Top;
+  lLabel.Position.Y := 800;
+  lLabel.Parent := fSideViewContent;
+
+  fCategoriesFilterMode := TComboBox.Create(fForm);
+  fCategoriesFilterMode.Margins.Left := 8;
+  fCategoriesFilterMode.Margins.right := 8;
+  fCategoriesFilterMode.Margins.Top := 8;
+  fCategoriesFilterMode.Align := TAlignLayout.Top;
+  fCategoriesFilterMode.Position.Y := 800;
+  fCategoriesFilterMode.Parent := fSideViewContent;
+  fCategoriesFilterMode.Items.Add('No category filtering');
+  fCategoriesFilterMode.Items.Add('Test in any category');
+  fCategoriesFilterMode.Items.Add('Test in all categories');
+  fCategoriesFilterMode.Items.Add('Test in no categories');
+  fCategoriesFilterMode.ItemIndex := 0;
+  fCategoriesFilterMode.OnChange := UpdateCategoriesLabel;
+
+  if Length(fCategories) = 0 then
+    begin
+      lLabel := TLabel.Create(fForm);
+      lLabel.Margins.Left := 8;
+      lLabel.Margins.Top := 8;
+      lLabel.Text := '<no categories>';
+      lLabel.Align := TAlignLayout.Top;
+      lLabel.Position.Y := 800;
+      lLabel.Parent := fSideViewContent;
+    end
+  else
+    begin
+      fCategoriesLayout := TLayout.Create(fForm);
+      fCategoriesLayout.Position.Y := 800;
+      fCategoriesLayout.Margins.Left := 8;
+      fCategoriesLayout.Margins.Right := 8;
+      fCategoriesLayout.Margins.Top := 8;
+      fCategoriesLayout.Parent := fSideViewContent;
+      fCategoriesLayout.Align := TAlignLayout.Top;
+
+      for i := 0 to High(fCategories) do
+        begin
+          lChk := TCheckBox.Create(fForm);
+          lChk.Position.Y := 800;
+          lChk.Text := fCategories[i];
+          lChk.TagString := fCategories[i];
+          lChk.Margins.Bottom := 8;
+          lChk.Parent := fCategoriesLayout;
+          lChk.Align := TAlignLayout.Top;
+          lChk.OnChange := UpdateCategoriesLabel;
+        end;
+      fCategoriesLayout.Height := lChk.Position.Y + lChk.Height + 8;
+    end;
 end;
 
 procedure TNxTestApp.OnFormCloseQuery(Sender: TObject; var CanClose: Boolean);
@@ -491,12 +836,25 @@ begin
   Result := not ContainsString(fDisabledTests, aTest.FullTestName);
 end;
 
-function TNxTestApp.TestSelected(const aTest: INxTest): Boolean;
+procedure TNxTestApp.UpdateCategoriesLabel(Sender: TObject);
+var
+  lText: string;
+  i: Integer;
 begin
-  // if selected tests array is empty, treat all tests as selected
-  Result := Length(fSelectedTests) = 0;
-  if not Result then
-    Result := ContainsString(fSelectedTests, aTest.FullTestName);
+  if fCategoriesFilterMode.ItemIndex = 0 then
+    lText := 'No categories filtering'
+  else
+    begin
+      case fCategoriesFilterMode.ItemIndex of
+        1 : lText := lText + 'Any categories: ';
+        2 : lText := lText + 'All categories: ';
+        3 : lText := lText + 'No categories: ';
+      end;
+      for i := 0 to fCategoriesLayout.Children.Count - 1 do
+        if TCheckBox(fCategoriesLayout.Children[i]).IsChecked then
+          lText := lText + fCategoriesLayout.Children[i].TagString + ', ';
+    end;
+  fFilterLabel.Text := lText;
 end;
 
 procedure TNxTestApp.UpdateTestSelection;
@@ -535,6 +893,131 @@ begin
   fConfig.SaveToFile;
 end;
 
+function TNxTestApp.CategoryFilter: INxTestStringsFilter;
+var
+  i: Integer;
+begin
+  case fCategoriesFilterMode.ItemIndex of
+    1 : // any category
+      begin
+        Result := TNxTestAnyCategoryFilter.Create;
+        for i := 0 to fCategoriesLayout.Children.Count - 1 do
+          if TCheckBox(fCategoriesLayout.Children[i]).IsChecked then
+            Result.AddString(fCategoriesLayout.Children[i].TagString);
+      end;
+    2 : // all categories
+      begin
+        Result := TNxTestAllCategoriesFilter.Create;
+        for i := 0 to fCategoriesLayout.Children.Count - 1 do
+          if TCheckBox(fCategoriesLayout.Children[i]).IsChecked then
+            Result.AddString(fCategoriesLayout.Children[i].TagString);
+      end;
+    3 : // no category
+      begin
+        Result := TNxTestNoCategoriesFilter.Create;
+        for i := 0 to fCategoriesLayout.Children.Count - 1 do
+          if TCheckBox(fCategoriesLayout.Children[i]).IsChecked then
+            Result.AddString(fCategoriesLayout.Children[i].TagString);
+      end;
+    else // category filtering disabled
+      Result := nil;
+  end;
+end;
+
+procedure TNxTestApp.ExecuteCollapseAll(Sender: TObject);
+begin
+  fTreeView.CollapseAll;
+  fSideView.HideMaster;
+end;
+
+procedure TNxTestApp.ExecuteExpandAll(Sender: TObject);
+begin
+  fTreeView.ExpandAll;
+  fSideView.HideMaster;
+end;
+
+procedure TNxTestApp.ExecuteSelectNode(Sender: TObject);
+var
+  i: Integer;
+  lCurrent: TTreeViewItem;
+  lNode: TTreeViewItem;
+begin
+  lCurrent := fTreeView.Selected;
+  if Assigned(lCurrent) then
+    begin
+      lCurrent.IsChecked := True;
+      for i := 0 to lCurrent.Count - 1 do
+        begin
+          lNode := lCurrent.ItemByIndex(i);
+          lNode.IsChecked := True;
+        end;
+    end;
+  fSideView.HideMaster;
+end;
+
+procedure TNxTestApp.ExecuteDeselectNode(Sender: TObject);
+var
+  i: Integer;
+  lCurrent: TTreeViewItem;
+  lNode: TTreeViewItem;
+begin
+  lCurrent := fTreeView.Selected;
+  if Assigned(lCurrent) then
+    begin
+      lCurrent.IsChecked := False;
+      for i := 0 to lCurrent.Count - 1 do
+        begin
+          lNode := lCurrent.ItemByIndex(i);
+          lNode.IsChecked := False;
+        end;
+    end;
+  fSideView.HideMaster;
+end;
+
+procedure TNxTestApp.ExecuteSelectAll(Sender: TObject);
+var
+  i: Integer;
+  lNode: TTreeViewItem;
+begin
+  for i := 0 to fTreeView.GlobalCount - 1 do
+    begin
+      lNode := fTreeView.ItemByGlobalIndex(i);
+      lNode.IsChecked := True;
+    end;
+  fSideView.HideMaster;
+end;
+
+procedure TNxTestApp.ExecuteDeselectAll(Sender: TObject);
+var
+  i: Integer;
+  lNode: TTreeViewItem;
+begin
+  for i := 1 to fTreeView.GlobalCount - 1 do
+    begin
+      lNode := fTreeView.ItemByGlobalIndex(i);
+      lNode.IsChecked := False;
+    end;
+  fSideView.HideMaster;
+end;
+
+procedure TNxTestApp.ExecuteSelectOutcome(Sender: TObject);
+var
+  i: Integer;
+  lNode: TTreeViewItem;
+  Outcome: TNxTestOutcome;
+begin
+  Outcome := TNxTestOutcome(TComponent(Sender).Tag);
+  for i := 0 to fTreeView.GlobalCount - 1 do
+    begin
+      lNode := fTreeView.ItemByGlobalIndex(i);
+      if lNode.Count > 0 then
+        lNode.IsChecked := True
+      else
+        lNode.IsChecked := TTestTreeItem(lNode).Status = Outcome;
+    end;
+  fSideView.HideMaster;
+end;
+
 procedure TNxTestApp.RunAll(Sender: TObject);
 var
   i: Integer;
@@ -549,24 +1032,36 @@ begin
   TTask.Run(
     procedure
     begin
-      Engine.Runner.RunTests(nil);
+      // always use category filter, it will be nil if category filtering is not enabled
+      Engine.Runner.RunTests(CategoryFilter);
     end);
 end;
 
 procedure TNxTestApp.RunSelected(Sender: TObject);
+var
+  lFilters: INxTestMultiFilter;
+  lNameFilter: INxTestStringsFilter;
 begin
   Running := True;
   UpdateTestSelection;
+  lFilters := TNxTestAllFilters.Create;
+  lNameFilter := TNxTestNameFilter.Create;
+  lNameFilter.AddStrings(fSelectedTests);
+  lFilters.AddFilter(lNameFilter);
+  // always use category filter, it will be nil if category filtering is not enabled
+  lFilters.AddFilter(CategoryFilter);
   TTask.Run(
     procedure
     begin
-      Engine.Runner.RunTests(TestSelected);
+      Engine.Runner.RunTests(lFilters);
     end);
 end;
 
 procedure TNxTestApp.SetRunning(const Value: Boolean);
 begin
   fRunning := Value;
+  fSideView.Enabled := not Value;
+  fSelectionToolBar.Enabled := not Value;
   fRunBtn.Enabled := not Value;
   fRunSelectedBtn.Enabled := not Value;
   fCancelRunBtn.Enabled := Value;
@@ -579,6 +1074,8 @@ begin
 end;
 
 procedure TNxTestApp.OnRunStart(const aTest: INxTest; aTotalCount: Integer);
+var
+  lOutcome: TNxTestOutcome;
 begin
   fStatusLabel.Text := 'Running...';
   fProgress.Value := 0;
@@ -586,6 +1083,9 @@ begin
   fScoreProgress.Value := 0;
   fScoreLabel.Text := 'Score: 0%';
   fScoreProgress.Max := aTotalCount;
+  fTotalLabel.Text := '0';
+  for lOutcome := Low(TNxTestOutcome) to Pred(High(TNxTestOutcome)) do
+    fOutcomeLabels[lOutcome].Text := '0';
 end;
 
 procedure TNxTestApp.OnRunEnds(const aTest: INxTest; const aSummary: INxTestSummary);
@@ -625,6 +1125,9 @@ begin
   if aResult.Outcome = TestSkip then
     fScoreProgress.Max := fScoreProgress.Max - 1;
   fScoreLabel.Text := Format('Score: %d%%', [Round(fScoreProgress.Value / fScoreProgress.Max * 100)]);
+  fTotalLabel.Text := Trunc(fProgress.Value).ToString;
+  if Assigned(fOutcomeLabels[aResult.Outcome]) then
+    fOutcomeLabels[aResult.Outcome].Text := (StrToInt(fOutcomeLabels[aResult.Outcome].Text) + 1).ToString;
 end;
 
 procedure TNxTestApp.OnStatus(const aTest: INxTest; const aStatusMsg: string);
