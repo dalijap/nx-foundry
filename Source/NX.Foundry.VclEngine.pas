@@ -39,6 +39,7 @@ uses
   System.UITypes,
   System.SysUtils,
   System.Classes,
+  System.Math,
   System.Generics.Collections,
   System.Actions,
   Winapi.Windows,
@@ -57,6 +58,7 @@ uses
   Types,
   SysUtils,
   Classes,
+  Math,
   Windows,
   CommCtrl,
   ImgList,
@@ -142,7 +144,7 @@ type
     fTestNodes: TNxTestTreeNodes;
     fDisabledTests: TNxStringArray;
     fSelectedTests: TNxStringArray;
-    fCategories: TNxStringArray;
+    fAllCategories: TNxStringArray;
     fFormInitialized: Boolean;
     fRunning: Boolean;
     fDpi: Integer;
@@ -167,6 +169,7 @@ type
     procedure CancelRun(Sender: TObject);
     function TestChecked(const aTest: INxTest): Boolean;
     procedure UpdateTestSelection;
+    function SelectedCategories: TNxStringArray;
     function CategoryFilter: INxTestStringsFilter;
     procedure SetRunning(const Value: Boolean);
     property Running: Boolean read fRunning write SetRunning;
@@ -853,7 +856,7 @@ begin
         lNode.TagString := lTest.FullTestName;
         TTreeViewNodeSetChecked(lNode, TestChecked(lTest));
         fTestNodes.AddOrSetValue(lTest.FullTestName, lNode);
-        AddUniqueStrings(fCategories, lTest.Categories);
+        AddUniqueStrings(fAllCategories, lTest.Categories);
       end;
   end;
 end;
@@ -888,10 +891,13 @@ begin
   fCategoriesFilterMode.Items.Add('Test in any category');
   fCategoriesFilterMode.Items.Add('Test in all categories');
   fCategoriesFilterMode.Items.Add('Test in no categories');
-  fCategoriesFilterMode.ItemIndex := 0;
+  if InRange(fConfig.CategoryFilterMode, 0, 3) then
+    fCategoriesFilterMode.ItemIndex := fConfig.CategoryFilterMode
+  else
+    fCategoriesFilterMode.ItemIndex := 0;
   fCategoriesFilterMode.OnChange := UpdateCategoriesLabel;
 
-  if Length(fCategories) = 0 then
+  if Length(fAllCategories) = 0 then
     begin
       lLabel := TLabel.Create(fForm);
       {$IFDEF VCL_PADDING}
@@ -918,10 +924,11 @@ begin
       fCategoriesLayout.Align := alTop;
       fCategoriesLayout.Parent := fSideViewContent;
 
-      for i := 0 to High(fCategories) do
+      for i := 0 to High(fAllCategories) do
         begin
           lChk := TCheckBox.Create(fForm);
-          lChk.Caption := fCategories[i];
+          lChk.Caption := fAllCategories[i];
+          lChk.Checked := ContainsString(fConfig.SelectedCategories, fAllCategories[i]);
           {$IFDEF VCL_PADDING}
           lChk.AlignWithMargins := True;
           lChk.Margins.Top := 0;
@@ -934,6 +941,7 @@ begin
         end;
       fCategoriesLayout.Height := h;
     end;
+  UpdateCategoriesLabel(nil);
 end;
 
 procedure TNxTestApp.OnFormCloseQuery(Sender: TObject; var CanClose: Boolean);
@@ -1014,34 +1022,38 @@ begin
     end;
 
   fConfig.DisabledTests := fDisabledTests;
+  fConfig.SelectedCategories := SelectedCategories;
+  fConfig.CategoryFilterMode := fCategoriesFilterMode.ItemIndex;
   fConfig.SaveToFile;
 end;
 
-function TNxTestApp.CategoryFilter: INxTestStringsFilter;
+function TNxTestApp.SelectedCategories: TNxStringArray;
 var
   i: Integer;
+begin
+  Result := nil;
+  for i := 0 to fCategoriesLayout.ControlCount - 1 do
+    if TCheckBox(fCategoriesLayout.Controls[i]).Checked then
+      AddString(Result, TCheckBox(fCategoriesLayout.Controls[i]).Caption);
+end;
+
+function TNxTestApp.CategoryFilter: INxTestStringsFilter;
 begin
   case fCategoriesFilterMode.ItemIndex of
     1 : // any category
       begin
         Result := TNxTestAnyCategoryFilter.Create;
-        for i := 0 to fCategoriesLayout.ControlCount - 1 do
-          if TCheckBox(fCategoriesLayout.Controls[i]).Checked then
-            Result.AddString(TCheckBox(fCategoriesLayout.Controls[i]).Caption);
+        Result.AddStrings(SelectedCategories);
       end;
     2 : // all categories
       begin
         Result := TNxTestAllCategoriesFilter.Create;
-        for i := 0 to fCategoriesLayout.ControlCount - 1 do
-          if TCheckBox(fCategoriesLayout.Controls[i]).Checked then
-            Result.AddString(TCheckBox(fCategoriesLayout.Controls[i]).Caption);
+        Result.AddStrings(SelectedCategories);
       end;
     3 : // no category
       begin
         Result := TNxTestNoCategoriesFilter.Create;
-        for i := 0 to fCategoriesLayout.ControlCount - 1 do
-          if TCheckBox(fCategoriesLayout.Controls[i]).Checked then
-            Result.AddString(TCheckBox(fCategoriesLayout.Controls[i]).Caption);
+        Result.AddStrings(SelectedCategories);
       end;
     else // category filtering disabled
       Result := nil;
@@ -1230,6 +1242,7 @@ end;
 procedure TNxTestApp.OnTestEnds(const aTest: INxTest; const aResult: INxTestResult);
 var
   lNode: TNxTreeNode;
+  lScore: Integer;
 begin
   if fTestNodes.TryGetValue(aTest.FullTestName, lNode) then
     begin
@@ -1242,7 +1255,12 @@ begin
   else
   if aResult.Outcome = TestSkip then
     fScoreProgress.Max := fScoreProgress.Max - 1;
-  fScoreLabel.Caption := Format('Score: %d%%', [Round(fScoreProgress.Position / fScoreProgress.Max * 100)]);
+
+  if fScoreProgress.Max > 0 then
+    lScore := Round(fScoreProgress.Position / fScoreProgress.Max * 100)
+  else
+    lScore := 0;
+  fScoreLabel.Caption := Format('Score: %d%%', [lScore]);
   fTotalLabel.Caption := IntToStr(fProgress.Position);
   if Assigned(fOutcomeLabels[aResult.Outcome]) then
     fOutcomeLabels[aResult.Outcome].Caption := IntToStr(StrToInt(fOutcomeLabels[aResult.Outcome].Caption) + 1);
