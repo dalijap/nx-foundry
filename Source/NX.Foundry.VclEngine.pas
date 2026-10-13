@@ -1032,9 +1032,10 @@ var
   i: Integer;
 begin
   Result := nil;
-  for i := 0 to fCategoriesLayout.ControlCount - 1 do
-    if TCheckBox(fCategoriesLayout.Controls[i]).Checked then
-      AddString(Result, TCheckBox(fCategoriesLayout.Controls[i]).Caption);
+  if Assigned(fCategoriesLayout) then
+    for i := 0 to fCategoriesLayout.ControlCount - 1 do
+      if TCheckBox(fCategoriesLayout.Controls[i]).Checked then
+        AddString(Result, TCheckBox(fCategoriesLayout.Controls[i]).Caption);
 end;
 
 function TNxTestApp.CategoryFilter: INxTestStringsFilter;
