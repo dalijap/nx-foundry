@@ -53,11 +53,15 @@ type
   protected
     fFileName: string;
     fDisabledTests: TNxStringArray;
+    fSelectedCategories: TNxStringArray;
+    fCategoryFilterMode: Integer;
   public
     constructor Create(const aFileName: string);
     procedure LoadFromFile;
     procedure SaveToFile;
     property DisabledTests: TNxStringArray read fDisabledTests write fDisabledTests;
+    property SelectedCategories: TNxStringArray read fSelectedCategories write fSelectedCategories;
+    property CategoryFilterMode: Integer read fCategoryFilterMode write fCategoryFilterMode;
   end;
 
 implementation
@@ -97,6 +101,20 @@ begin
           finally
             sl.Free;
           end;
+
+          lValue := VarToStr(lConfig.ChildValues['selected_categories']);
+          sl := TStringList.Create;
+          try
+            sl.Text := lValue;
+            SetLength(fSelectedCategories, sl.Count);
+            for i := 0 to High(fSelectedCategories) do
+              fSelectedCategories[i] := sl[i];
+          finally
+            sl.Free;
+          end;
+
+          lValue := VarToStr(lConfig.ChildValues['category_filter_mode']);
+          fCategoryFilterMode := StrToIntDef(lValue, 0);
         end;
     except
     end;
@@ -121,6 +139,18 @@ begin
       else
         lValue := lValue + #13#10 + fDisabledTests[i];
     lTests.NodeValue := lValue;
+
+    lTests := lConfig.AddChild('selected_categories');
+    for i := 0 to High(fSelectedCategories) do
+      if i = 0 then
+        lValue := fSelectedCategories[i]
+      else
+        lValue := lValue + #13#10 + fSelectedCategories[i];
+    lTests.NodeValue := lValue;
+
+    lTests := lConfig.AddChild('category_filter_mode');
+    lTests.NodeValue := fCategoryFilterMode;
+
     lDoc.SaveToFile(fFileName);
   except
   end;
