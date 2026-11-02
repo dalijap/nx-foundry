@@ -37,6 +37,9 @@ uses
   {$IFDEF GENERICS}
   System.Generics.Collections,
   {$ENDIF}
+  {$IFDEF ATTRIBUTES}
+  System.Rtti,
+  {$ENDIF}
   System.SysUtils,
   System.Classes,
   System.Contnrs,
@@ -46,6 +49,9 @@ uses
   SysUtils,
   Classes,
   Contnrs,
+  {$IFDEF ATTRIBUTES}
+  Rtti,
+  {$ENDIF}
   {$ENDIF}
   NX.Foundry;
 
@@ -103,16 +109,47 @@ type
     TestIncomplete
     );
 
+  {$IFDEF ATTRIBUTES}
+  CategoryAttribute = class(TCustomAttribute)
+  private
+    fCategory: string;
+  public
+    constructor Create(const aCategory: string);
+    property Category: string read fCategory;
+  end;
+
+  IgnoreAttribute = class(TCustomAttribute)
+  private
+    fReason: string;
+  public
+    constructor Create(const aReason: string = '');
+    property Reason: string read fReason;
+  end;
+
+  NxRtti = class
+  protected
+    class var fContext: TRttiContext;
+    class constructor ClassCreate;
+    class destructor ClassDestroy;
+    class function GetContext: TRttiContext; static;
+  public
+    class property Context: TRttiContext read GetContext;
+  end;
+  {$ENDIF}
+
   TNxTestDescriptor = class
   private
     fTestName: string;
     fCategories: TNxStringArray;
+    fIgnored: Boolean;
   public
     constructor Create(const aTestName: string);
     procedure AddCategory(const aCategory: string);
     procedure AddCategories(const aCategories: array of string);
+    procedure Ignore;
     property TestName: string read fTestName;
     property Categories: TNxStringArray read fCategories;
+    property Ignored: Boolean read fIgnored;
   end;
 
   TNxTestDescriptorList = class
@@ -186,6 +223,7 @@ type
   INxTestInfo = interface
     ['{872557E6-9BEF-4A3E-B66E-6109475613CC}']
     function GetCategories: TNxStringArray;
+    function GetIsIgnored: Boolean;
     function GetTestPath: string;
     function GetTestUnitName: string;
     function GetTestClassName: string;
@@ -194,6 +232,7 @@ type
     function GetFullTestName: string;
     function GetTestClass: TClass;
     property Categories: TNxStringArray read GetCategories;
+    property IsIgnored: Boolean read GetIsIgnored;
     property TestPath: string read GetTestPath;
     property TestUnitName: string read GetTestUnitName;
     property TestClassName: string read GetTestClassName;
@@ -205,7 +244,10 @@ type
 
   INxTest = interface(INxTestInfo)
     ['{BE84487C-2D2A-4531-A66A-9A7EE1FF0E67}']
+    procedure AddCategory(const aCategory: string);
+    procedure AddCategories(const aCategories: array of string);
     procedure ApplyDescriptor(aDescriptor: TNxTestDescriptor);
+    procedure Ignore;
     procedure Run;
   end;
 
@@ -373,15 +415,16 @@ type
     property Executed: Integer read GetExecuted;
   end;
 
-
   TNxBaseTest = class(TInterfacedObject, INxTest)
   protected
     AutoPool: INxAutoReleasePool;
     fCategories: TNxStringArray;
     fTestMethodName: string;
     fTestName: string;
+    fIsIgnored: Boolean;
 
     function GetCategories: TNxStringArray;
+    function GetIsIgnored: Boolean;
     function GetTestPath: string; virtual;
     function GetTestUnitName: string;
     function GetTestClassName: string;
@@ -393,12 +436,17 @@ type
     procedure SetUp; virtual;
     procedure TearDown; virtual;
     procedure Execute; virtual;
+    procedure ApplyAttributes; virtual;
   public
     procedure AfterConstruction; override;
     procedure BeforeDestruction; override;
+    procedure AddCategory(const aCategory: string);
+    procedure AddCategories(const aCategories: array of string);
     procedure ApplyDescriptor(aDescriptor: TNxTestDescriptor);
+    procedure Ignore;
     procedure Run;
     property Categories: TNxStringArray read GetCategories;
+    property IsIgnored: Boolean read fIsIgnored;
     property TestPath: string read GetTestPath;
     property TestUnitName: string read GetTestUnitName;
     property TestClassName: string read GetTestClassName;
@@ -415,6 +463,7 @@ type
   TNxTestCase = class(TNxBaseTest)
   protected
     fCodePtr: Pointer;
+    procedure ApplyAttributes; override;
     procedure Execute; override;
   public
     constructor Create(const aMethodName: string; aCodePtr: Pointer); overload;
@@ -445,6 +494,7 @@ type
     fClass: TNxTestCaseClass;
     fDiscovered: Boolean;
     function GetTestPath: string; override;
+    procedure ApplyAttributes; override;
   public
     constructor Create(const aClass: TNxTestCaseClass);
     procedure Discover(aDescriptor: TNxTestDescriptorList); override;
@@ -522,7 +572,6 @@ type
   protected
     fSuite: INxTestSuite;
     fConfigList: TNxTestDescriptorList;
-    fIgnoredTests: TStringList;
   public
     constructor Create;
     destructor Destroy; override;
@@ -535,9 +584,9 @@ type
     procedure CategorizeTest(const aTestClass: TNxTestCaseClass; aMethod: Pointer; const aCategories: array of string); overload;
     procedure CategorizeTests(const aTestClass: TNxTestCaseClass; const aCategory: string); overload;
     procedure CategorizeTests(const aTestClass: TNxTestCaseClass; const aCategories: array of string); overload;
-    procedure IgnoreTest(const aTestClass: TNxTestCaseClass; aMethod: Pointer);
+    procedure IgnoreTest(const aTestClass: TNxTestCaseClass; aMethod: Pointer); overload;
+    procedure IgnoreTest(const aTestClass: TNxTestCaseClass; const aMethodName: string); overload;
     procedure IgnoreTests(const aTestClass: TNxTestCaseClass);
-    function IsTestIgnored(const aTestName: string): Boolean;
     procedure Discover;
     property Suite: INxTestSuite read fSuite;
     property ConfigList: TNxTestDescriptorList read fConfigList;
@@ -553,10 +602,10 @@ type
     class procedure CategorizeTests(const aTestClass: TNxTestCaseClass; const aCategory: string); overload; {$IFDEF STATIC} static; {$ENDIF}
     class procedure CategorizeTests(const aTestClass: TNxTestCaseClass; const aCategories: array of string); overload; {$IFDEF STATIC} static; {$ENDIF}
     // Ignores single published test method from a test class
-    class procedure IgnoreTest(const aTestClass: TNxTestCaseClass; aMethod: Pointer); {$IFDEF STATIC} static; {$ENDIF}
+    class procedure IgnoreTest(const aTestClass: TNxTestCaseClass; aMethod: Pointer); overload; {$IFDEF STATIC} static; {$ENDIF}
+    class procedure IgnoreTest(const aTestClass: TNxTestCaseClass; const aMethodName: string); overload; {$IFDEF STATIC} static; {$ENDIF}
     // Ignores all published test methods from a test class
     class procedure IgnoreTests(const aTestClass: TNxTestCaseClass); {$IFDEF STATIC} static; {$ENDIF}
-    class function IsTestIgnored(const aTestName: string): Boolean; {$IFDEF STATIC} static; {$ENDIF}
     class procedure Discover; {$IFDEF STATIC} static; {$ENDIF}
     class function Suite: INxTestSuite; {$IFDEF STATIC} static; {$ENDIF}
     class function ConfigList: TNxTestDescriptorList; {$IFDEF STATIC} static; {$ENDIF}
@@ -631,6 +680,59 @@ end;
 {$ENDIF}
 
 {$IFDEF REGION}
+{$REGION '***** Attributes *****'}
+{$ENDIF}
+
+{$IFDEF ATTRIBUTES}
+
+// ***** CategoryAttribute *****
+
+constructor CategoryAttribute.Create(const aCategory: string);
+begin
+  inherited Create;
+  fCategory := aCategory;
+end;
+
+// ***** IgnoreAttribute *****
+
+constructor IgnoreAttribute.Create(const aReason: string);
+begin
+  inherited Create;
+  fReason := aReason;
+end;
+
+// ***** NxRtti *****
+
+class constructor NxRtti.ClassCreate;
+begin
+  {$IFDEF DELPHI_XE7_UP}
+  // Fix for RSP-38281
+  TRttiContext.KeepContext;
+  {$ENDIF}
+  fContext := TRttiContext.Create;
+  fContext.FindType('');
+end;
+
+class destructor NxRtti.ClassDestroy;
+begin
+  fContext.Free;
+  {$IFDEF DELPHI_XE7_UP}
+  TRttiContext.DropContext;
+  {$ENDIF}
+end;
+
+class function NxRtti.GetContext: TRttiContext;
+begin
+  Result := fContext;
+end;
+
+{$ENDIF}
+
+{$IFDEF REGION}
+{$ENDREGION '***** Attributes *****'}
+{$ENDIF}
+
+{$IFDEF REGION}
 {$REGION '***** Configuration *****'}
 {$ENDIF}
 
@@ -653,6 +755,11 @@ begin
   // skip verifying whether category is unique for speed
   // categories are used only as a flag and duplicates don't have impact on functionality
   AddStrings(fCategories, aCategories);
+end;
+
+procedure TNxTestDescriptor.Ignore;
+begin
+  fIgnored := True;
 end;
 
 // ***** TNxTestDescriptorList *****
@@ -1089,6 +1196,7 @@ procedure TNxBaseTest.AfterConstruction;
 begin
   inherited;
   AutoPool := NxAutoRelease.NewPool;
+  ApplyAttributes;
 end;
 
 procedure TNxBaseTest.BeforeDestruction;
@@ -1107,6 +1215,11 @@ end;
 
 procedure TNxBaseTest.Execute;
 begin
+end;
+
+function TNxBaseTest.GetIsIgnored: Boolean;
+begin
+  Result := fIsIgnored;
 end;
 
 function TNxBaseTest.GetCategories: TNxStringArray;
@@ -1156,9 +1269,30 @@ begin
   Result := ClassType;
 end;
 
+procedure TNxBaseTest.AddCategory(const aCategory: string);
+begin
+  AddString(fCategories, aCategory);
+end;
+
+procedure TNxBaseTest.AddCategories(const aCategories: array of string);
+begin
+  AddStrings(fCategories, aCategories);
+end;
+
+procedure TNxBaseTest.ApplyAttributes;
+begin
+end;
+
 procedure TNxBaseTest.ApplyDescriptor(aDescriptor: TNxTestDescriptor);
 begin
   AddStrings(fCategories, aDescriptor.Categories);
+  if aDescriptor.Ignored then
+    Ignore;
+end;
+
+procedure TNxBaseTest.Ignore;
+begin
+  fIsIgnored := True;
 end;
 
 procedure TNxBaseTest.Run;
@@ -1223,6 +1357,25 @@ begin
   fTestName := aMethodName;
   fCodePtr := aCodePtr;
 end;
+
+{$IFDEF ATTRIBUTES}
+procedure TNxTestCase.ApplyAttributes;
+var
+  lType: TRttiType;
+  lMethod: TRttiMethod;
+  lAttr: TCustomAttribute;
+begin
+  lType := NxRtti.Context.GetType(ClassType);
+  lMethod := lType.GetMethod(fTestMethodName);
+
+  for lAttr in lMethod.GetAttributes do
+    if lAttr is CategoryAttribute then
+      AddString(fCategories, CategoryAttribute(lAttr).Category)
+    else
+    if lAttr is IgnoreAttribute then
+      fIsIgnored := True;
+end;
+{$ENDIF}
 
 procedure TNxTestCase.Execute;
 var
@@ -1312,6 +1465,23 @@ begin
   fClass := aClass;
 end;
 
+{$IFDEF ATTRIBUTES}
+procedure TNxTestCaseSuite.ApplyAttributes;
+var
+  lType: TRttiType;
+  lAttr: TCustomAttribute;
+begin
+  lType := NxRtti.Context.GetType(fClass);
+
+  for lAttr in lType.GetAttributes do
+    if lAttr is CategoryAttribute then
+      AddString(fCategories, CategoryAttribute(lAttr).Category)
+    else
+    if lAttr is IgnoreAttribute then
+      fIsIgnored := True;
+end;
+{$ENDIF}
+
 procedure TNxTestCaseSuite.Discover(aDescriptor: TNxTestDescriptorList);
 var
   lMethods: TNxStringArray;
@@ -1331,6 +1501,10 @@ begin
       lDescriptor := aDescriptor.FindTest(lTest.FullTestName);
       if Assigned(lDescriptor) then
         lTest.ApplyDescriptor(lDescriptor);
+      if Length(fCategories) > 0 then
+        lTest.AddCategories(Categories);
+      if IsIgnored then
+        lTest.Ignore;
     end;
   fDiscovered := True;
 end;
@@ -1498,7 +1672,7 @@ begin
             begin
               // test for ignored only after test passes other filters
               // otherwise test results will be polluted with ignored tests
-              if NxTestRegistry.IsTestIgnored(lTest.FullTestName) then
+              if lTest.IsIgnored then
                 InternalSkipTest(lTest, TestIgnore, aSummary)
               else
                 InternalRunTest(lTest, aSummary)
@@ -1791,15 +1965,11 @@ begin
   inherited;
   fSuite := TNxTestSuite.Create(ExtractFileName(ParamStr(0)));
   fConfigList := TNxTestDescriptorList.Create;
-  fIgnoredTests := TStringList.Create;
-  fIgnoredTests.Sorted := True;
-  fIgnoredTests.Duplicates := dupIgnore;
 end;
 
 destructor TNxTestRegistry.Destroy;
 begin
   fConfigList.Free;
-  fIgnoredTests.Free;
   inherited;
 end;
 
@@ -1892,8 +2062,27 @@ begin
 end;
 
 procedure TNxTestRegistry.IgnoreTest(const aTestClass: TNxTestCaseClass; aMethod: Pointer);
+var
+  lConfig: TNxTestDescriptor;
+  lTestName: string;
 begin
-  fIgnoredTests.Add(aTestClass.ClassFullTestName(aTestClass, aMethod));
+  lTestName := aTestClass.ClassFullTestName(aTestClass, aMethod);
+  lConfig := fConfigList.FindTest(lTestName);
+  if lConfig = nil then
+    lConfig := fConfigList.AddTest(lTestName);
+  lConfig.Ignore;
+end;
+
+procedure TNxTestRegistry.IgnoreTest(const aTestClass: TNxTestCaseClass; const aMethodName: string);
+var
+  lConfig: TNxTestDescriptor;
+  lTestName: string;
+begin
+  lTestName := aTestClass.ClassFullTestName(aTestClass, aMethodName);
+  lConfig := fConfigList.FindTest(lTestName);
+  if lConfig = nil then
+    lConfig := fConfigList.AddTest(lTestName);
+  lConfig.Ignore;
 end;
 
 procedure TNxTestRegistry.IgnoreTests(const aTestClass: TNxTestCaseClass);
@@ -1903,14 +2092,7 @@ var
 begin
   lMethods := PublishedMethodNames(aTestClass);
   for i := 0 to High(lMethods) do
-    fIgnoredTests.Add(aTestClass.ClassFullTestName(aTestClass, lMethods[i]));
-end;
-
-function TNxTestRegistry.IsTestIgnored(const aTestName: string): Boolean;
-var
-  Idx: Integer;
-begin
-  Result := fIgnoredTests.Find(aTestName, Idx);
+    IgnoreTest(aTestClass, lMethods[i]);
 end;
 
 // ***** NxTestRegistry *****
@@ -1955,14 +2137,14 @@ begin
   fNxTestRegistry.IgnoreTest(aTestClass, aMethod);
 end;
 
+class procedure NxTestRegistry.IgnoreTest(const aTestClass: TNxTestCaseClass; const aMethodName: string);
+begin
+  fNxTestRegistry.IgnoreTest(aTestClass, aMethodName);
+end;
+
 class procedure NxTestRegistry.IgnoreTests(const aTestClass: TNxTestCaseClass);
 begin
   fNxTestRegistry.IgnoreTests(aTestClass);
-end;
-
-class function NxTestRegistry.IsTestIgnored(const aTestName: string): Boolean;
-begin
-  Result := fNxTestRegistry.IsTestIgnored(aTestName);
 end;
 
 class procedure NxTestRegistry.Discover;
