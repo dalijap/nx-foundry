@@ -806,6 +806,7 @@ begin
       fCategoriesLayout.Parent := fSideViewContent;
       fCategoriesLayout.Align := TAlignLayout.Top;
 
+      lChk := nil;
       for i := 0 to High(fAllCategories) do
         begin
           lChk := TCheckBox.Create(fForm);
@@ -818,7 +819,8 @@ begin
           lChk.Align := TAlignLayout.Top;
           lChk.OnChange := UpdateCategoriesLabel;
         end;
-      fCategoriesLayout.Height := lChk.Position.Y + lChk.Height + 8;
+      if Assigned(lChk) then
+        fCategoriesLayout.Height := lChk.Position.Y + lChk.Height + 8;
     end;
   UpdateCategoriesLabel(nil);
 end;
@@ -1102,7 +1104,7 @@ end;
 
 procedure TNxTestApp.OnRunEnds(const aTest: INxTest; const aSummary: INxTestSummary);
 begin
-  fStatusLabel.Text := Format('Completed: %s Duration: %s', [NxTestOutcomeText[aSummary.Outcome], FormatDuration(aSummary.Duration)]);
+  fStatusLabel.Text := Format('Completed: %s Duration: %s', [NxTestOutcomeText[aSummary.Outcome], FormatDurationMs(aSummary.Duration)]);
   Running := False;
 end;
 

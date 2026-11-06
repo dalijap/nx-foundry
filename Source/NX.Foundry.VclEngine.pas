@@ -483,7 +483,6 @@ var
   lBtn: TButton;
   lSpeedBtn: TSpeedButton;
   lAction: TAction;
-  lChk: TCheckBox;
   lOutcome: TNxTestOutcome;
   lLabel: TLabel;
   lPos: Integer;
@@ -1213,7 +1212,7 @@ end;
 
 procedure TNxTestApp.OnRunEnds(const aTest: INxTest; const aSummary: INxTestSummary);
 begin
-  fStatusBar.SimpleText := Format('Completed: %s Duration: %s', [NxTestOutcomeText[aSummary.Outcome], FormatDuration(aSummary.Duration)]);
+  fStatusBar.SimpleText := Format('Completed: %s Duration: %s', [NxTestOutcomeText[aSummary.Outcome], FormatDurationMs(aSummary.Duration)]);
   Running := False;
 end;
 

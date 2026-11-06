@@ -655,7 +655,7 @@ begin
     .Write('----------------------------------------------------')
 
     .Indent
-    .Write(Format('Total Time: %s', [FormatDuration(aSummary.Duration)]))
+    .Write(Format('Total Time: %s', [FormatDurationMs(aSummary.Duration)]))
     .Outdent
     .Write('====================================================')
     .Writeln;

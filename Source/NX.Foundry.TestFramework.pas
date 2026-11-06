@@ -43,7 +43,24 @@ uses
   System.SysUtils,
   System.Classes,
   System.Contnrs,
-  System.Diagnostics,
+  {$IFDEF MSWINDOWS}
+  Winapi.Windows,
+  {$ELSE}
+  Posix.Base,
+  Posix.Time,
+  {$ENDIF}
+  {$IFDEF IOS}
+  Macapi.Mach,
+  Macapi.Helpers,
+  Macapi.ObjectiveC,
+  iOSapi.Foundation,
+  {$ENDIF}
+  {$IFDEF OSX}
+  Macapi.Mach,
+  Macapi.Helpers,
+  Macapi.ObjectiveC,
+  Macapi.Foundation,
+  {$ENDIF}
   {$ELSE}
   Windows,
   SysUtils,
@@ -179,13 +196,13 @@ type
     ['{FD39D82E-AAE9-4B30-BFCF-36546E9CFE5F}']
     function GetInfo: INxTestInfo;
     function GetOutcome: TNxTestOutcome;
-    function GetDuration: UInt32;
+    function GetDuration: Int64;
     function GetExceptionMsg: string;
     function GetStackTrace: string;
     property Info: INxTestInfo read GetInfo;
     property Outcome: TNxTestOutcome read GetOutcome;
-    // duration in miliseconds
-    property Duration: UInt32 read GetDuration;
+    // duration in nanoseconds
+    property Duration: Int64 read GetDuration;
     property ExceptionMsg: string read GetExceptionMsg;
     property StackTrace: string read GetStackTrace;
   end;
@@ -357,18 +374,18 @@ type
     fInfo: INxTestInfo;
     fExceptionMsg: string;
     fStackTrace: string;
-    fDuration: UInt32;
+    fDuration: Int64;
     fOutcome: TNxTestOutcome;
     function GetInfo: INxTestInfo;
     function GetOutcome: TNxTestOutcome; virtual;
-    function GetDuration: UInt32;
+    function GetDuration: Int64;
     function GetExceptionMsg: string;
     function GetStackTrace: string;
   public
-    constructor Create(const aInfo: INxTestInfo; aOutcome: TNxTestOutcome; aDuration: UInt32; const aExceptionMsg, aStackTrace: string);
+    constructor Create(const aInfo: INxTestInfo; aOutcome: TNxTestOutcome; aDuration: Int64; const aExceptionMsg, aStackTrace: string);
     property Info: INxTestInfo read GetInfo;
     property Outcome: TNxTestOutcome read GetOutcome;
-    property Duration: UInt32 read GetDuration;
+    property Duration: Int64 read GetDuration;
     property ExceptionMsg: string read GetExceptionMsg;
     property StackTrace: string read GetStackTrace;
   end;
@@ -463,7 +480,9 @@ type
   TNxTestCase = class(TNxBaseTest)
   protected
     fCodePtr: Pointer;
+    {$IFDEF ATTRIBUTES}
     procedure ApplyAttributes; override;
+    {$ENDIF}
     procedure Execute; override;
   public
     constructor Create(const aMethodName: string; aCodePtr: Pointer); overload;
@@ -494,7 +513,9 @@ type
     fClass: TNxTestCaseClass;
     fDiscovered: Boolean;
     function GetTestPath: string; override;
+    {$IFDEF ATTRIBUTES}
     procedure ApplyAttributes; override;
+    {$ENDIF}
   public
     constructor Create(const aClass: TNxTestCaseClass);
     procedure Discover(aDescriptor: TNxTestDescriptorList); override;
@@ -612,7 +633,7 @@ type
   end;
 
 // standalone helper functions
-function FormatDuration(aDuration: UInt32): string;
+function FormatDurationMs(aDuration: Int64): string;
 procedure AddString(var aStrings: TNxStringArray; const aValue: string);
 procedure AddStrings(var aStrings: TNxStringArray; const aValues: array of string);
 procedure AddUniqueString(var aStrings: TNxStringArray; const aValue: string);
@@ -635,45 +656,74 @@ var
 implementation
 
 {$IFDEF REGION}
-{$REGION '***** Compatibility *****'}
+{$REGION '***** TNxStopwatch *****'}
 {$ENDIF}
 
-{$IFNDEF NAMESPACES}
+// https://opensource.apple.com/source/Libc/Libc-1439.40.11/gen/clock_gettime.c.auto.html
+
+{$IF Defined(MACOS) or Defined(IOS)}
 type
-  TStopWatch = object
+  clockid_t = clock_res_t;
+
+function clock_gettime(clk_id: clockid_t; ts: Ptimespec): Integer; cdecl;
+  external libc name _PU + 'clock_gettime';
+{$EXTERNALSYM clock_gettime}
+
+const
+  CLOCK_MONOTONIC = 6;
+{$IFEND}
+
+type
+  {$IFDEF ENHANCED_RECORDS}
+  TNxStopwatch = record
+  {$ELSE}
+  TNxStopwatch = object
+  {$ENDIF}
   private
-    fStartTimeStamp: UInt32;
-    fElapsed: UInt32;
+    fStartTime: Int64;
+    fElapsed: Int64;
   public
-    procedure Reset;
     procedure Start;
     procedure Stop;
-    function ElapsedMilliseconds: UInt32;
+    property ElapsedNs: Int64 read fElapsed;
   end;
 
-// ***** TStopWatch *****
-
-procedure TStopWatch.Reset;
+{$IFDEF MSWINDOWS}
+function GetTimeStampNs: Int64;
+var
+  Ticks, Freq: Int64;
 begin
+  if QueryPerformanceCounter(Ticks) then
+    begin
+      QueryPerformanceFrequency(Freq);
+      Result := (1000000000 div Freq) * Ticks;
+    end
+  else
+    Result := Int64(GetTickCount) * 1000000;
+end;
+{$ELSE}
+function GetTimeStampNs: Int64;
+var
+  ts: timespec;
+begin
+  Result := 0;
+  if clock_gettime(CLOCK_MONOTONIC, @ts) = 0 then
+    Result := (Int64(1000000000) * ts.tv_sec + ts.tv_nsec)
+  else
+    Result := 0;
+end;
+{$ENDIF}
+
+procedure TNxStopwatch.Start;
+begin
+  fStartTime := GetTimeStampNs;
   fElapsed := 0;
 end;
 
-procedure TStopWatch.Start;
+procedure TNxStopwatch.Stop;
 begin
-  fStartTimeStamp := GetTickCount;
+  fElapsed := GetTimeStampNs - fStartTime;
 end;
-
-procedure TStopWatch.Stop;
-begin
-  fElapsed := GetTickCount - fStartTimeStamp;
-end;
-
-function TStopWatch.ElapsedMilliseconds: UInt32;
-begin
-  Result := fElapsed;
-end;
-
-{$ENDIF}
 
 {$IFDEF REGION}
 {$ENDREGION '***** Compatibility *****'}
@@ -825,7 +875,7 @@ end;
 
 // ***** TNxTestResult *****
 
-constructor TNxTestResult.Create(const aInfo: INxTestInfo; aOutcome: TNxTestOutcome; aDuration: UInt32; const aExceptionMsg, aStackTrace: string);
+constructor TNxTestResult.Create(const aInfo: INxTestInfo; aOutcome: TNxTestOutcome; aDuration: Int64; const aExceptionMsg, aStackTrace: string);
 begin
   inherited Create;
   fInfo := aInfo;
@@ -840,7 +890,7 @@ begin
   Result := fInfo
 end;
 
-function TNxTestResult.GetDuration: UInt32;
+function TNxTestResult.GetDuration: Int64;
 begin
   Result := fDuration;
 end;
@@ -1559,14 +1609,13 @@ end;
 
 procedure TNxTestRunner.InvokeTest(const aTest: INxTest; const aSummary: INxTestSummary);
 var
-  sw: TStopwatch;
+  sw: TNxStopwatch;
   lResult: INxTestResult;
   lExceptionMsg: string;
   lStackTrace: string;
   lOutcome: TNxTestOutcome;
 begin
   NotifyTestStart(aTest);
-  sw.Reset;
   sw.Start;
   try
     aTest.Run;
@@ -1598,7 +1647,7 @@ begin
       end;
   end;
   sw.Stop;
-  lResult := TNxTestResult.Create(aTest, lOutcome, sw.ElapsedMilliseconds, lExceptionMsg, lStackTrace);
+  lResult := TNxTestResult.Create(aTest, lOutcome, sw.ElapsedNs, lExceptionMsg, lStackTrace);
   aSummary.AddResult(lResult);
   NotifyTestEnds(aTest, lResult);
 end;
@@ -2166,10 +2215,13 @@ end;
 {$ENDREGION '***** Registry *****'}
 {$ENDIF}
 
-function FormatDuration(aDuration: UInt32): string;
+function FormatDurationMs(aDuration: Int64): string;
 var
   h, m, s, ms: UInt32;
 begin
+  // convert nanoseconds to miliseconds
+  aDuration := aDuration div 1000000;
+
   h := aDuration div 3600000;
   aDuration := aDuration mod 3600000;
   m := aDuration div 60000;
