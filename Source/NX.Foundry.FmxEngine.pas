@@ -887,6 +887,9 @@ begin
   for i := 0 to fTreeView.GlobalCount - 1 do
     begin
       lNode := fTreeView.ItemByGlobalIndex(i);
+      // always select root node
+      if i = 0 then
+        lNode.IsChecked := True;
       TTestTreeItem(lNode).Status := TestSkip;
       if not lNode.IsChecked then
         AddUniqueString(fDisabledTests, lNode.TagString);

@@ -1004,6 +1004,9 @@ begin
   for i := 0 to fTreeView.Items.Count - 1 do
     begin
       lNode := fTreeView.Items[i] as TNxTreeNode;
+      // always select root node
+      if i = 0 then
+        TTreeViewNodeSetChecked(LNode, True);
       lNode.ImageIndex := Ord(TestSkip);
       lNode.SelectedIndex := Ord(TestSkip);
       if not TreeViewNodeIsChecked(lNode) then
