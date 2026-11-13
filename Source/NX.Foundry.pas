@@ -43,14 +43,16 @@ uses
   System.Classes,
   System.Contnrs,
   System.DateUtils,
-  System.Math;
+  System.Math,
+  System.Variants;
   {$ELSE}
   Windows,
   SysUtils,
   Classes,
   Contnrs,
   DateUtils,
-  Math;
+  Math,
+  Variants;
   {$ENDIF}
 
 const
@@ -394,6 +396,34 @@ type
     function EqualTo(const Expected: Char; const Msg: string = ''): IExpectChar;
   end;
 
+  IExpectAnsiChar = interface
+    function IsNot: IExpectAnsiChar;
+    function EqualTo(const Expected: AnsiChar; const Msg: string = ''): IExpectAnsiChar;
+  end;
+
+  TExpectAnsiChar = class(TExpectBase, IExpectAnsiChar)
+  private
+    fValue: AnsiChar;
+  public
+    constructor Create(const Value: AnsiChar);
+    function IsNot: IExpectAnsiChar;
+    function EqualTo(const Expected: AnsiChar; const Msg: string = ''): IExpectAnsiChar;
+  end;
+
+  IExpectWideChar = interface
+    function IsNot: IExpectWideChar;
+    function EqualTo(const Expected: WideChar; const Msg: string = ''): IExpectWideChar;
+  end;
+
+  TExpectWideChar = class(TExpectBase, IExpectWideChar)
+  private
+    fValue: WideChar;
+  public
+    constructor Create(const Value: WideChar);
+    function IsNot: IExpectWideChar;
+    function EqualTo(const Expected: WideChar; const Msg: string = ''): IExpectWideChar;
+  end;
+
   IExpectString = interface
     function IsNot: IExpectString;
     function EqualTo(const Expected: string; const Msg: string = ''): IExpectString;
@@ -494,9 +524,42 @@ type
     function Same(const Expected: IInterface; const Msg: string = ''): IExpectInterface;
   end;
 
+  IExpectVariant = interface
+    function IsNot: IExpectVariant;
+    function Null(const Msg: string = ''): IExpectVariant;
+    function EqualTo(const Expected: Variant; const Msg: string = ''): IExpectVariant;
+  end;
+
+  TExpectVariant = class(TExpectBase, IExpectVariant)
+  private
+    fValue: Variant;
+  public
+    constructor Create(const Value: Variant);
+    function IsNot: IExpectVariant;
+    function Null(const Msg: string = ''): IExpectVariant;
+    function EqualTo(const Expected: Variant; const Msg: string = ''): IExpectVariant;
+  end;
+
+{$IFDEF TBYTES}
+  IExpectBytes = interface
+    function IsNot: IExpectBytes;
+    function EqualTo(const Expected: TBytes; const Msg: string = ''): IExpectBytes; overload;
+  end;
+
+  TExpectBytes = class(TExpectBase, IExpectBytes)
+  private
+    fValue: TBytes;
+  public
+    constructor Create(const Value: TBytes);
+    function IsNot: IExpectBytes;
+    function EqualTo(const Expected: TBytes; const Msg: string = ''): IExpectBytes; overload;
+  end;
+{$ENDIF}
+
   IExpectMemory = interface
     function IsNot: IExpectMemory;
-    function EqualTo(const Expected: Pointer; Size: NativeInt; const Msg: string = ''): IExpectMemory;
+    function Same(const Expected: Pointer; const Msg: string = ''): IExpectMemory; overload;
+    function EqualTo(const Expected: Pointer; Size: NativeInt; const Msg: string = ''): IExpectMemory; overload;
   end;
 
   TExpectMemory = class(TExpectBase, IExpectMemory)
@@ -505,7 +568,8 @@ type
   public
     constructor Create(const Value: Pointer);
     function IsNot: IExpectMemory;
-    function EqualTo(const Expected: Pointer; Size: NativeInt; const Msg: string = ''): IExpectMemory;
+    function Same(const Expected: Pointer; const Msg: string = ''): IExpectMemory; overload;
+    function EqualTo(const Expected: Pointer; Size: NativeInt; const Msg: string = ''): IExpectMemory; overload;
   end;
 
 {$IFDEF GENERICS}
@@ -533,6 +597,7 @@ type
 // standalone Expect functions
 // not organized within a class to allow custom extensions which follow the same syntax
 
+procedure ExpectPass;
 procedure ExpectThrows(const Expected: ExceptClass);
 function ExpectProcedure(const Proc: TNxProcedure): IExpectProcedure; overload;
 function ExpectProcedure(const Proc: TNxProcedureMth): IExpectProcedure; overload;
@@ -555,15 +620,23 @@ function ExpectCurrency(const Actual: Currency): IExpectCurrency; overload;
 function Expect(const Actual: Char): IExpectChar; overload;
 function Expect(const Actual: string): IExpectString; overload;
 {$IFDEF UNICODE}
+function Expect(const Actual: AnsiChar): IExpectAnsiChar; overload;
 function Expect(const Actual: UTF8String): IExpectUtf8String; overload;
 function Expect(const Actual: AnsiString): IExpectAnsiString; overload;
 function Expect(const Actual: WideString): IExpectWideString; overload;
+{$ELSE}
+function Expect(const Actual: WideChar): IExpectWideChar; overload;
 {$ENDIF}
 function ExpectUtf8String(const Actual: UTF8String): IExpectUtf8String; overload;
 function ExpectAnsiString(const Actual: AnsiString): IExpectAnsiString; overload;
 function ExpectWideString(const Actual: WideString): IExpectWideString; overload;
 function Expect(const Actual: TObject): IExpectObject; overload;
 function Expect(const Actual: IInterface): IExpectInterface; overload;
+function ExpectVariant(const Actual: Variant): IExpectVariant; overload;
+{$IFDEF TBYTES}
+function Expect(const Actual: TBytes): IExpectBytes; overload;
+{$ENDIF}
+function Expect(const Actual: Pointer): IExpectMemory; overload;
 
 // Runs code in background thread and waits for completion.
 // If aFail is set raise timeout exception with additional aMsg
@@ -1458,6 +1531,62 @@ begin
   Result := Self;
 end;
 
+// ***** TExpectAnsiChar *****
+
+constructor TExpectAnsiChar.Create(const Value: AnsiChar);
+begin
+  fNot := False;
+  fValue := Value;
+end;
+
+function TExpectAnsiChar.IsNot: IExpectAnsiChar;
+begin
+  fNot := True;
+  Result := Self;
+end;
+
+function TExpectAnsiChar.EqualTo(const Expected: AnsiChar; const Msg: string): IExpectAnsiChar;
+var
+  Passed: Boolean;
+begin
+  NxExpect.DoExpect;
+
+  Passed := fValue = Expected;
+  if fNot then
+    Passed := not Passed;
+  if not Passed then
+    NxExpect.FailEqualTo(fNot, string(fValue), string(Expected), Msg);
+  Result := Self;
+end;
+
+// ***** TExpectWideChar *****
+
+constructor TExpectWideChar.Create(const Value: WideChar);
+begin
+  fNot := False;
+  fValue := Value;
+end;
+
+function TExpectWideChar.IsNot: IExpectWideChar;
+begin
+  fNot := True;
+  Result := Self;
+end;
+
+function TExpectWideChar.EqualTo(const Expected: WideChar; const Msg: string): IExpectWideChar;
+var
+  Passed: Boolean;
+begin
+  NxExpect.DoExpect;
+
+  Passed := fValue = Expected;
+  if fNot then
+    Passed := not Passed;
+  if not Passed then
+    NxExpect.FailEqualTo(fNot, string(fValue), string(Expected), Msg);
+  Result := Self;
+end;
+
 // ***** TExpectString *****
 
 constructor TExpectString.Create(const Value: string);
@@ -1714,6 +1843,48 @@ begin
   Result := Self;
 end;
 
+// ***** TExpectVariant *****
+
+constructor TExpectVariant.Create(const Value: Variant);
+begin
+  fNot := False;
+  fValue := Value;
+end;
+
+function TExpectVariant.IsNot: IExpectVariant;
+begin
+  fNot := True;
+  Result := Self;
+end;
+
+function TExpectVariant.Null(const Msg: string): IExpectVariant;
+var
+  Passed: Boolean;
+begin
+  NxExpect.DoExpect;
+
+  Passed := VarIsNull(fValue);
+  if fNot then
+    Passed := not Passed;
+  if not Passed then
+    NxExpect.FailNull(fNot, @fValue, Msg);
+  Result := Self;
+end;
+
+function TExpectVariant.EqualTo(const Expected: Variant; const Msg: string): IExpectVariant;
+var
+  Passed: Boolean;
+begin
+  NxExpect.DoExpect;
+
+  Passed := fValue = Expected;
+  if fNot then
+    Passed := not Passed;
+  if not Passed then
+    NxExpect.FailEqualTo(fNot, VarToStrDef(fValue, sNil), VarToStrDef(Expected, sNil), Msg);
+  Result := Self;
+end;
+
 // ***** TExpectMemory *****
 
 constructor TExpectMemory.Create(const Value: Pointer);
@@ -1725,6 +1896,20 @@ end;
 function TExpectMemory.IsNot: IExpectMemory;
 begin
   fNot := True;
+  Result := Self;
+end;
+
+function TExpectMemory.Same(const Expected: Pointer; const Msg: string): IExpectMemory;
+var
+  Passed: Boolean;
+begin
+  NxExpect.DoExpect;
+
+  Passed := fValue = Expected;
+  if fNot then
+    Passed := not Passed;
+  if not Passed then
+    NxExpect.FailSame(fNot, fValue, Expected, Msg);
   Result := Self;
 end;
 
@@ -1741,6 +1926,39 @@ begin
     NxExpect.FailEqualToMemory(fNot, fValue, Expected, Msg);
   Result := Self;
 end;
+
+{$IFDEF TBYTES}
+
+// ***** TExpectBytes *****
+
+constructor TExpectBytes.Create(const Value: TBytes);
+begin
+  fNot := False;
+  fValue := Value;
+end;
+
+function TExpectBytes.IsNot: IExpectBytes;
+begin
+  fNot := True;
+  Result := Self;
+end;
+
+function TExpectBytes.EqualTo(const Expected: TBytes; const Msg: string): IExpectBytes;
+var
+  Passed: Boolean;
+begin
+  NxExpect.DoExpect;
+
+  Passed := Length(fValue) = Length(Expected);
+  if Passed and (Length(fValue) > 0) then
+    Passed := CompareMem(@fValue[0], @Expected[0], Length(fValue));
+  if fNot then
+    Passed := not Passed;
+  if not Passed then
+    NxExpect.FailEqualToMemory(fNot, @fValue, @Expected, Msg);
+  Result := Self;
+end;
+{$ENDIF}
 
 {$IFDEF GENERICS}
 
@@ -1779,6 +1997,11 @@ end;
 {$ENDIF}
 
 // standalone functions
+
+procedure ExpectPass;
+begin
+  NxExpect.DoExpect;
+end;
 
 procedure ExpectThrows(const Expected: ExceptClass);
 begin
@@ -1870,6 +2093,11 @@ begin
 end;
 
 {$IFDEF UNICODE}
+function Expect(const Actual: AnsiChar): IExpectAnsiChar;
+begin
+  Result := TExpectAnsiChar.Create(Actual);
+end;
+
 function Expect(const Actual: UTF8String): IExpectUtf8String;
 begin
   Result := TExpectUTF8String.Create(Actual);
@@ -1883,6 +2111,11 @@ end;
 function Expect(const Actual: WideString): IExpectWideString;
 begin
   Result := TExpectWideString.Create(Actual);
+end;
+{$ELSE}
+function Expect(const Actual: WideChar): IExpectWideChar;
+begin
+  Result := TExpectWideChar.Create(Actual);
 end;
 {$ENDIF}
 
@@ -1910,6 +2143,24 @@ function Expect(const Actual: IInterface): IExpectInterface;
 begin
   Result := TExpectInterface.Create(Actual);
 end;
+
+function ExpectVariant(const Actual: Variant): IExpectVariant;
+begin
+  Result := TExpectVariant.Create(Actual);
+end;
+
+{$IFDEF TBYTES}
+function Expect(const Actual: TBytes): IExpectBytes;
+begin
+  Result := TExpectBytes.Create(Actual);
+end;
+{$ENDIF}
+
+function Expect(const Actual: Pointer): IExpectMemory;
+begin
+  Result := TExpectMemory.Create(Actual);
+end;
+
 
 {$IFDEF REGION}
 {$ENDREGION '***** Expect *****'}

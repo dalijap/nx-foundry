@@ -223,18 +223,23 @@
   {$DEFINE ENHANCED_RECORDS}
 {$IFEND}
 
+// TBytes
+{$IF CompilerVersion >= 18.5}
+  {$DEFINE TBYTES}
+{$IFEND}
+
 // anonymous method support
 // generics support
 {$IF CompilerVersion >= 20.0}  
   {$DEFINE ANONYMOUS_METHODS}
   {$DEFINE GENERICS}
   {$DEFINE STACKTRACE}  
-  {$DEFINE RTTIEX}  
 {$IFEND}
 
-// attributes
+// attributes, enhanced Rtti and TValue
 {$IF CompilerVersion >= 21.0}
   {$DEFINE ATTRIBUTES}
+  {$DEFINE RTTIEX}
 {$IFEND}
 
 // format settings 
@@ -278,7 +283,5 @@
 {$ENDIF}
 
 {$B-}  // short circuit boolean evaluation
-{$O+}  // optimization
-{$W-}  // stack frames
 
 
