@@ -37,7 +37,6 @@ uses
   System.SysUtils,
   System.Classes,
   System.Contnrs,
-  System.Diagnostics,
   {$ELSE}
   Windows,
   SysUtils,

@@ -479,7 +479,7 @@ type
   {$M+}
   TNxTestCase = class(TNxBaseTest)
   protected
-    fCodePtr: Pointer;
+    fMth: TNxProcedureMth;
     {$IFDEF ATTRIBUTES}
     procedure ApplyAttributes; override;
     {$ENDIF}
@@ -1405,7 +1405,8 @@ begin
   inherited Create;
   fTestMethodName := aMethodName;
   fTestName := aMethodName;
-  fCodePtr := aCodePtr;
+  TMethod(fMth).Code := aCodePtr;
+  TMethod(fMth).Data := Self;
 end;
 
 {$IFDEF ATTRIBUTES}
@@ -1428,12 +1429,8 @@ end;
 {$ENDIF}
 
 procedure TNxTestCase.Execute;
-var
-  lMth: TNxProcedureMth;
 begin
-  TMethod(lMth).Code := fCodePtr;
-  TMethod(lMth).Data := Self;
-  lMth();
+  fMth();
 end;
 
 class function TNxTestCase.Suite: INxTestSuite;
