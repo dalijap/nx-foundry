@@ -70,6 +70,9 @@ uses
   Rtti,
   {$ENDIF}
   {$ENDIF}
+  {$IFDEF ATTRIBUTES}
+  NX.Foundry.Attributes,
+  {$ENDIF}
   NX.Foundry;
 
 type
@@ -127,31 +130,8 @@ type
     );
 
   {$IFDEF ATTRIBUTES}
-  CategoryAttribute = class(TCustomAttribute)
-  private
-    fCategory: string;
-  public
-    constructor Create(const aCategory: string);
-    property Category: string read fCategory;
-  end;
-
-  IgnoreAttribute = class(TCustomAttribute)
-  private
-    fReason: string;
-  public
-    constructor Create(const aReason: string = '');
-    property Reason: string read fReason;
-  end;
-
-  NxRtti = class
-  protected
-    class var fContext: TRttiContext;
-    class constructor ClassCreate;
-    class destructor ClassDestroy;
-    class function GetContext: TRttiContext; static;
-  public
-    class property Context: TRttiContext read GetContext;
-  end;
+  CategoryAttribute = NX.Foundry.Attributes.CategoryAttribute;
+  IgnoreAttribute = NX.Foundry.Attributes.IgnoreAttribute;
   {$ENDIF}
 
   TNxTestDescriptor = class
@@ -727,59 +707,6 @@ end;
 
 {$IFDEF REGION}
 {$ENDREGION '***** Compatibility *****'}
-{$ENDIF}
-
-{$IFDEF REGION}
-{$REGION '***** Attributes *****'}
-{$ENDIF}
-
-{$IFDEF ATTRIBUTES}
-
-// ***** CategoryAttribute *****
-
-constructor CategoryAttribute.Create(const aCategory: string);
-begin
-  inherited Create;
-  fCategory := aCategory;
-end;
-
-// ***** IgnoreAttribute *****
-
-constructor IgnoreAttribute.Create(const aReason: string);
-begin
-  inherited Create;
-  fReason := aReason;
-end;
-
-// ***** NxRtti *****
-
-class constructor NxRtti.ClassCreate;
-begin
-  {$IFDEF DELPHI_XE7_UP}
-  // Fix for RSP-38281
-  TRttiContext.KeepContext;
-  {$ENDIF}
-  fContext := TRttiContext.Create;
-  fContext.FindType('');
-end;
-
-class destructor NxRtti.ClassDestroy;
-begin
-  fContext.Free;
-  {$IFDEF DELPHI_XE7_UP}
-  TRttiContext.DropContext;
-  {$ENDIF}
-end;
-
-class function NxRtti.GetContext: TRttiContext;
-begin
-  Result := fContext;
-end;
-
-{$ENDIF}
-
-{$IFDEF REGION}
-{$ENDREGION '***** Attributes *****'}
 {$ENDIF}
 
 {$IFDEF REGION}
