@@ -984,6 +984,10 @@ begin
 end;
 
 {$IFDEF REGION}
+{$ENDREGION '***** Results *****'}
+{$ENDIF}
+
+{$IFDEF REGION}
 {$REGION '***** Lists *****'}
 {$ENDIF}
 
@@ -2139,6 +2143,10 @@ end;
 {$ENDREGION '***** Registry *****'}
 {$ENDIF}
 
+{$IFDEF REGION}
+{$REGION '***** Utility functions *****'}
+{$ENDIF}
+
 function FormatDurationMs(aDuration: Int64): string;
 var
   h, m, s, ms: UInt32;
@@ -2261,6 +2269,10 @@ begin
     Result := False;
   end;
 end;
+
+{$IFDEF REGION}
+{$ENDREGION '***** Utility functions *****'}
+{$ENDIF}
 
 initialization
 
