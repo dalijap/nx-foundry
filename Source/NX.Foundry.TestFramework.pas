@@ -39,6 +39,7 @@ uses
   {$ENDIF}
   {$IFDEF ATTRIBUTES}
   System.Rtti,
+  System.TypInfo,
   {$ENDIF}
   System.SysUtils,
   System.Classes,
@@ -68,6 +69,7 @@ uses
   Contnrs,
   {$IFDEF ATTRIBUTES}
   Rtti,
+  TypInfo,
   {$ENDIF}
   {$ENDIF}
   {$IFDEF ATTRIBUTES}
@@ -132,6 +134,8 @@ type
   {$IFDEF ATTRIBUTES}
   CategoryAttribute = NX.Foundry.Attributes.CategoryAttribute;
   IgnoreAttribute = NX.Foundry.Attributes.IgnoreAttribute;
+  TestAttribute = NX.Foundry.Attributes.TestAttribute;
+  TestCaseAttribute = NX.Foundry.Attributes.TestCaseAttribute;
   {$ENDIF}
 
   TNxTestDescriptor = class
@@ -461,11 +465,17 @@ type
   protected
     fMth: TNxProcedureMth;
     {$IFDEF ATTRIBUTES}
+    fValues: TArray<TValue>;
+    fRttiMth: TRttiMethod;
     procedure ApplyAttributes; override;
     {$ENDIF}
     procedure Execute; override;
   public
     constructor Create(const aMethodName: string; aCodePtr: Pointer); overload;
+    {$IFDEF ATTRIBUTES}
+    constructor Create(const aMethodName: string; aRttiMth: TRttiMethod); overload;
+    constructor Create(const aMethodName, aTestCaseName: string; const aValues: TArray<TValue>; aRttiMth: TRttiMethod); overload;
+    {$ENDIF}
     class function Suite: INxTestSuite; virtual;
   end;
 
@@ -495,9 +505,12 @@ type
     function GetTestPath: string; override;
     {$IFDEF ATTRIBUTES}
     procedure ApplyAttributes; override;
+    procedure DoDiscoverRtti(aDescriptor: TNxTestDescriptorList);
     {$ENDIF}
+    procedure DoPrepareTest(const aTest: INxTest; aDescriptor: TNxTestDescriptor);
   public
-    constructor Create(const aClass: TNxTestCaseClass);
+    constructor Create(const aClass: TNxTestCaseClass); overload;
+    constructor Create(const aClass: TNxTestCaseClass; const aMethodName: string); overload;
     procedure Discover(aDescriptor: TNxTestDescriptorList); override;
   end;
 
@@ -628,6 +641,10 @@ const
   NxTestOutcomeLetter: array[TNxTestOutcome] of string = ('-', '.', '?', 'I', 'L', 'F', 'E', 'T', 'A');
   NxTestOutcomeText: array[TNxTestOutcome] of string = ('SKIP', 'PASS', 'EMPTY', 'IGNORE', 'LEAK', 'FAIL', 'ERROR', 'TIMEOUT', 'ABORT');
   NxTestOutcomeDescription: array[TNxTestOutcome] of string = ('Skipped', 'Passed', 'Empty', 'Ignored', 'Leaked', 'Failed', 'Errored', 'Timeout', 'Aborted');
+  {$IFDEF ATTRIBUTES}
+  Named = TNxNamedTest.Named;
+  Parsed = TNxParsedTest.Parsed;
+  {$ENDIF}
 
 // global engine reference, should be initialized only once at application startup
 var
@@ -1341,6 +1358,30 @@ begin
 end;
 
 {$IFDEF ATTRIBUTES}
+constructor TNxTestCase.Create(const aMethodName: string; aRttiMth: TRttiMethod);
+begin
+  fTestMethodName := aMethodName;
+  fTestName := aMethodName;
+  fRttiMth := aRttiMth;
+end;
+
+constructor TNxTestCase.Create(const aMethodName, aTestCaseName: string; const aValues: TArray<TValue>; aRttiMth: TRttiMethod);
+var
+  lTestCaseName: string;
+begin
+  inherited Create;
+  fValues := aValues;
+  fTestMethodName := aMethodName;
+  lTestCaseName := aTestCaseName;
+  if lTestCaseName = '' then
+    lTestCaseName := NxRtti.TestCaseName(aValues);
+  if lTestCaseName = '' then
+    fTestName := aMethodName
+  else
+    fTestName := aMethodName + '.' + lTestCaseName;
+  fRttiMth := aRttiMth;
+end;
+
 procedure TNxTestCase.ApplyAttributes;
 var
   lType: TRttiType;
@@ -1348,8 +1389,12 @@ var
   lAttr: TCustomAttribute;
 begin
   lType := NxRtti.Context.GetType(ClassType);
-  lMethod := lType.GetMethod(fTestMethodName);
-
+  if Assigned(fRttiMth) then
+    lMethod := fRttiMth
+  else
+    lMethod := lType.GetMethod(fTestMethodName);
+  if not Assigned(lMethod) then
+    Exit;
   for lAttr in lMethod.GetAttributes do
     if lAttr is CategoryAttribute then
       AddString(fCategories, CategoryAttribute(lAttr).Category)
@@ -1357,12 +1402,20 @@ begin
     if lAttr is IgnoreAttribute then
       fIsIgnored := True;
 end;
-{$ENDIF}
 
+procedure TNxTestCase.Execute;
+begin
+  if Assigned(fRttiMth) then
+    fRttiMth.Invoke(Self, fValues)
+  else
+    fMth();
+end;
+{$ELSE}
 procedure TNxTestCase.Execute;
 begin
   fMth();
 end;
+{$ENDIF}
 
 class function TNxTestCase.Suite: INxTestSuite;
 begin
@@ -1443,6 +1496,23 @@ begin
   fClass := aClass;
 end;
 
+constructor TNxTestCaseSuite.Create(const aClass: TNxTestCaseClass; const aMethodName: string);
+begin
+  inherited Create(aClass.ClassName + '.' + aMethodName);
+  fClass := aClass;
+end;
+
+procedure TNxTestCaseSuite.DoPrepareTest(const aTest: INxTest; aDescriptor: TNxTestDescriptor);
+begin
+  AddTest(aTest);
+  if Assigned(aDescriptor) then
+    aTest.ApplyDescriptor(aDescriptor);
+  if Length(fCategories) > 0 then
+    aTest.AddCategories(Categories);
+  if IsIgnored then
+    aTest.Ignore;
+end;
+
 {$IFDEF ATTRIBUTES}
 procedure TNxTestCaseSuite.ApplyAttributes;
 var
@@ -1458,33 +1528,104 @@ begin
     if lAttr is IgnoreAttribute then
       fIsIgnored := True;
 end;
+
+procedure TNxTestCaseSuite.DoDiscoverRtti(aDescriptor: TNxTestDescriptorList);
+
+function PrepareValues(aValues: TArray<TValue>; aParams: TArray<TRttiParameter>): TArray<TValue>;
+var
+  i: Integer;
+begin
+  SetLength(Result, Length(aParams));
+  for i := 0 to High(Result) do
+    if i < Length(aValues) then
+      Result[i] := NxRtti.Convert(aValues[i], aParams[i].ParamType)
+    else
+      Result[i] := NxRtti.Convert(TValue.Empty, aParams[i].ParamType);
+end;
+
+var
+  lTest: INxTest;
+  lDescriptor: TNxTestDescriptor;
+  lType: TRttiType;
+  lMethod: TRttiMethod;
+  lParams: TArray<TRttiParameter>;
+  lValues: TArray<TValue>;
+  lAttrs: TArray<TCustomAttribute>;
+  lAttr: TCustomAttribute;
+  lSuite: TNxTestCaseSuite;
+  lCount: Integer;
+  i: Integer;
+begin
+  lType := NxRtti.Context.GetType(fClass);
+
+  for lMethod in lType.GetMethods do
+    if (lMethod.MethodKind = mkProcedure) and (lMethod.Visibility <> mvPublished) then
+      begin
+        lParams := lMethod.GetParameters;
+        lAttrs := lMethod.GetAttributes;
+        // find and process TestCaseProvider attributes
+        if NxRtti.HasAttribute(lAttrs, TestCaseProviderAttribute) then
+          begin
+          end
+        else
+        // find and process TestCase attributes
+        if NxRtti.HasAttribute(lAttrs, TestCaseAttribute) then
+          begin
+            // add new suite if there are multiple test cases for the same method
+            lCount := NxRtti.AttributeCount(lAttrs, TestCaseAttribute);
+            if lCount > 1 then
+              begin
+                lSuite := TNxTestCaseSuite.Create(fClass, lMethod.Name);
+                lSuite.fDiscovered := True;
+                AddSuite(lSuite);
+              end
+            else
+              lSuite := Self;
+
+            for lAttr in lAttrs do
+              if lAttr is TestCaseAttribute then
+                begin
+                  lValues := PrepareValues(TestCaseAttribute(lAttr).Values, lParams);
+                  lTest := fClass.Create(lMethod.Name, TestCaseAttribute(lAttr).Name, lValues, lMethod);
+                  lDescriptor := aDescriptor.FindTest(lTest.TestPath + '.' + lMethod.Name);
+                  lSuite.DoPrepareTest(lTest, lDescriptor);
+                end;
+          end
+        else
+        if (Length(lParams) = 0) and NxRtti.HasAttribute(lAttrs, TestAttribute) then
+          begin
+            lTest := fClass.Create(lMethod.Name, lMethod);
+            lDescriptor := aDescriptor.FindTest(lTest.FullTestName);
+            DoPrepareTest(lTest, lDescriptor);
+          end;
+      end;
+end;
 {$ENDIF}
 
 procedure TNxTestCaseSuite.Discover(aDescriptor: TNxTestDescriptorList);
 var
+  lTest: INxTest;
+  lDescriptor: TNxTestDescriptor;
   lMethods: TNxStringArray;
   lCodePtr: Pointer;
-  lTest: INxTest;
   i: Integer;
-  lDescriptor: TNxTestDescriptor;
 begin
   if fDiscovered then
     Exit;
+  fDiscovered := True;
+  // discover parameterless published methods
   lMethods := PublishedMethodNames(fClass);
   for i := 0 to High(lMethods) do
     begin
       lCodePtr := fClass.MethodAddress(lMethods[i]);
       lTest := fClass.Create(lMethods[i], lCodePtr);
-      AddTest(lTest);
       lDescriptor := aDescriptor.FindTest(lTest.FullTestName);
-      if Assigned(lDescriptor) then
-        lTest.ApplyDescriptor(lDescriptor);
-      if Length(fCategories) > 0 then
-        lTest.AddCategories(Categories);
-      if IsIgnored then
-        lTest.Ignore;
+      DoPrepareTest(lTest, lDescriptor);
     end;
-  fDiscovered := True;
+  // discover non published methods through attributes
+  {$IFDEF ATTRIBUTES}
+  DoDiscoverRtti(aDescriptor);
+  {$ENDIF}
 end;
 
 function TNxTestCaseSuite.GetTestPath: string;
