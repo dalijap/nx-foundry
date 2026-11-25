@@ -1667,14 +1667,18 @@ var
   lSuite: INxTestSuite;
 begin
   fFilter := aFilter;
-  lSuite := fNxTestRegistry.Suite;
-  lSuite.Discover(fNxTestRegistry.ConfigList);
-  lSummary := TNxTestSummary.Create(lSuite, lSuite.TotalCount);
-  NotifyRunStart(lSuite, lSuite.TotalCount);
   try
-    InternalRunTests(lSuite, lSummary);
+    lSuite := fNxTestRegistry.Suite;
+    lSuite.Discover(fNxTestRegistry.ConfigList);
+    lSummary := TNxTestSummary.Create(lSuite, lSuite.TotalCount);
+    NotifyRunStart(lSuite, lSuite.TotalCount);
+    try
+      InternalRunTests(lSuite, lSummary);
+    finally
+      NotifyRunEnds(lSuite, lSummary);
+    end;
   finally
-    NotifyRunEnds(lSuite, lSummary);
+    fFilter := nil;
   end;
 end;
 

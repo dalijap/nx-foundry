@@ -36,17 +36,17 @@ interface
 uses
   // TestInsight must be initialized first
   TestInsight.Client,
-  Nx.Foundry.TestFramework;
+  NX.Foundry.TestFramework;
 
 type
-  TNxTestInsightEngine = class(TNxTestEngine)
+  TNxTestInsightEngine = class(TNxTestEngine, INxTestFilter)
   private
     fClient: ITestInsightClient;
     fSelectedTests: TNxStringArray;
   public
     constructor Create(const BaseUrl: string = DefaultUrl); reintroduce;
     procedure Start; override;
-    function TestSelected(const aTest: INxTest): Boolean;
+    function Matches(const aTest: INxTest): Boolean;
   end;
 
   TNxTestInsightReporter = class(TInterfacedObject, INxTestReporter)
@@ -85,15 +85,15 @@ end;
 
 procedure TNxTestInsightEngine.Start;
 begin
-  Runner.RunTests(TestSelected);
+  Runner.RunTests(Self);
 end;
 
-function TNxTestInsightEngine.TestSelected(const aTest: INxTest): Boolean;
+function TNxTestInsightEngine.Matches(const aTest: INxTest): Boolean;
 begin
   // if selected tests array is empty, treat all tests as selected
   Result := Length(fSelectedTests) = 0;
   if not Result then
-    Result := ContainsString(aTest.TestPath + '.' + aTest.TestName, fSelectedTests);
+    Result := ContainsString(fSelectedTests, aTest.TestPath + '.' + aTest.TestName);
 end;
 
 { TNxTestInsightReporter }
