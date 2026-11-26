@@ -136,6 +136,7 @@ type
   IgnoreAttribute = NX.Foundry.Attributes.IgnoreAttribute;
   TestAttribute = NX.Foundry.Attributes.TestAttribute;
   TestCaseAttribute = NX.Foundry.Attributes.TestCaseAttribute;
+  TestCaseProviderAttribute = NX.Foundry.Attributes.TestCaseProviderAttribute;
   {$ENDIF}
 
   TNxTestDescriptor = class
@@ -467,7 +468,10 @@ type
     {$IFDEF ATTRIBUTES}
     fValues: TArray<TValue>;
     fRttiMth: TRttiMethod;
+    fProviderFunc: TNxTestCaseProviderFunc;
+    fProviderIndex: Integer;
     procedure ApplyAttributes; override;
+    function GetValues: TArray<TValue>;
     {$ENDIF}
     procedure Execute; override;
   public
@@ -475,6 +479,7 @@ type
     {$IFDEF ATTRIBUTES}
     constructor Create(const aMethodName: string; aRttiMth: TRttiMethod); overload;
     constructor Create(const aMethodName, aTestCaseName: string; const aValues: TArray<TValue>; aRttiMth: TRttiMethod); overload;
+    constructor Create(const aMethodName, aTestCaseName: string; aProviderIndex: Integer; aProviderFunc: TNxTestCaseProviderFunc; aRttiMth: TRttiMethod); overload;
     {$ENDIF}
     class function Suite: INxTestSuite; virtual;
   end;
@@ -1382,6 +1387,17 @@ begin
   fRttiMth := aRttiMth;
 end;
 
+constructor TNxTestCase.Create(const aMethodName, aTestCaseName: string; aProviderIndex: Integer;
+  aProviderFunc: TNxTestCaseProviderFunc; aRttiMth: TRttiMethod);
+begin
+  fProviderIndex := aProviderIndex;
+  fProviderFunc := aProviderFunc;
+  if aTestCaseName = '' then
+    Create(aMethodName, 'TestCase' + (aProviderIndex + 1).ToString, nil, aRttiMth)
+  else
+    Create(aMethodName, aTestCaseName, nil, aRttiMth);
+end;
+
 procedure TNxTestCase.ApplyAttributes;
 var
   lType: TRttiType;
@@ -1403,10 +1419,18 @@ begin
       fIsIgnored := True;
 end;
 
+function TNxTestCase.GetValues: TArray<TValue>;
+begin
+  if Assigned(fProviderFunc) then
+    Result := fProviderFunc(fProviderIndex)
+  else
+    Result := fValues;
+end;
+
 procedure TNxTestCase.Execute;
 begin
   if Assigned(fRttiMth) then
-    fRttiMth.Invoke(Self, fValues)
+    fRttiMth.Invoke(Self, GetValues)
   else
     fMth();
 end;
@@ -1531,7 +1555,7 @@ end;
 
 procedure TNxTestCaseSuite.DoDiscoverRtti(aDescriptor: TNxTestDescriptorList);
 
-function PrepareValues(aValues: TArray<TValue>; aParams: TArray<TRttiParameter>): TArray<TValue>;
+function PrepareValues(const aValues: TArray<TValue>; const aParams: TArray<TRttiParameter>): TArray<TValue>;
 var
   i: Integer;
 begin
@@ -1543,6 +1567,15 @@ begin
       Result[i] := NxRtti.Convert(TValue.Empty, aParams[i].ParamType);
 end;
 
+function FindProviderFunc(aClass: TClass; const aName: string): TNxTestCaseProviderFunc;
+var
+  lMethod: TRttiMethod;
+begin
+  lMethod := NxRtti.Context.GetType(aClass).GetMethod(aName);
+  if lMethod.IsStatic then
+    Result := lMethod.CodeAddress;
+end;
+
 var
   lTest: INxTest;
   lDescriptor: TNxTestDescriptor;
@@ -1552,6 +1585,9 @@ var
   lValues: TArray<TValue>;
   lAttrs: TArray<TCustomAttribute>;
   lAttr: TCustomAttribute;
+  lProviderAttr: TestCaseProviderAttribute;
+  lProviderFunc: TNxTestCaseProviderFunc;
+  lTestCaseName: string;
   lSuite: TNxTestCaseSuite;
   lCount: Integer;
   i: Integer;
@@ -1566,6 +1602,38 @@ begin
         // find and process TestCaseProvider attributes
         if NxRtti.HasAttribute(lAttrs, TestCaseProviderAttribute) then
           begin
+            for lAttr in lAttrs do
+              if lAttr is TestCaseProviderAttribute then
+                begin
+                  lProviderAttr := lAttr as TestCaseProviderAttribute;
+                  if Assigned(lProviderAttr.ProviderClass) then
+                    lProviderFunc := FindProviderFunc(lProviderAttr.ProviderClass, lProviderAttr.ProviderName)
+                  else
+                    lProviderFunc := FindProviderFunc(fClass, lProviderAttr.ProviderName);
+                  if Assigned(lProviderFunc) then
+                    begin
+                      // get names of provider test cases and setup tests
+                      lValues := lProviderFunc(-1);
+                      if Length(lValues) > 1 then
+                        begin
+                          lSuite := TNxTestCaseSuite.Create(fClass, lMethod.Name);
+                          lSuite.fDiscovered := True;
+                          AddSuite(lSuite);
+                        end
+                      else
+                        lSuite := Self;
+                      for i := 0 to High(lValues) do
+                        begin
+                          if lValues[i].IsEmpty then
+                            lTestCaseName := ''
+                          else
+                            lTestCaseName := lValues[i].ToString;
+                          lTest := fClass.Create(lMethod.Name, lTestCaseName, i, lProviderFunc, lMethod);
+                          lDescriptor := aDescriptor.FindTest(lTest.TestPath + '.' + lMethod.Name);
+                          lSuite.DoPrepareTest(lTest, lDescriptor);
+                        end;
+                    end;
+                end;
           end
         else
         // find and process TestCase attributes

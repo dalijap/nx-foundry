@@ -164,6 +164,10 @@ type
     constructor Create(Arg1, Arg2, Arg3, Arg4, Arg5, Arg6: Boolean); overload;
   end;
 
+  // for data index -1 returns array with names of test cases
+  // number of returned names should match the number of test cases
+  TNxTestCaseProviderFunc = function(aDataIndex: Integer): TArray<TValue>;
+
   TestCaseProviderAttribute = class(TCustomAttribute)
   private
     fProviderClass: TClass;
