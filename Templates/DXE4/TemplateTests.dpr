@@ -1,6 +1,6 @@
 program TemplateTests;
 
-{$DEFINE CONSOLE_TESTRUNNER}
+// {$DEFINE CONSOLE_TESTRUNNER}
 
 // {$DEFINE CI}
 
@@ -15,11 +15,12 @@ uses
   {$ELSE}
   {$IFNDEF CONSOLE_TESTRUNNER}
   NX.Foundry.VclEngine,
-  {$ENDIF}
-  {$ENDIF}
+  {$ENDIF }
+  {$ENDIF }
   NX.Foundry.Reporters,
   NX.Foundry.TestFramework,
-  TemplateSuites in '..\TemplateSuites.pas';
+  TemplateSuites in '..\TemplateSuites.pas',
+  TemplateAttrSuites in '..\TemplateAttrSuites.pas';
 
 {$R *.res}
 

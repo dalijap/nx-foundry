@@ -1,6 +1,6 @@
 program TemplateTests;
 
-{$DEFINE CONSOLE_TESTRUNNER}
+// {$DEFINE CONSOLE_TESTRUNNER}
 
 {$IFNDEF TESTINSIGHT}
 {$IFNDEF CONSOLE_TESTRUNNER}
@@ -29,7 +29,8 @@ uses
   {$ENDIF}
   NX.Foundry.Reporters,
   NX.Foundry.TestFramework,
-  TemplateSuites in '..\TemplateSuites.pas';
+  TemplateSuites in '..\TemplateSuites.pas',
+  TemplateAttrSuites in '..\TemplateAttrSuites.pas';
 
 {$R *.res}
 
